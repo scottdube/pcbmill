@@ -1,0 +1,23 @@
+G04 #@! TF.GenerationSoftware,KiCad,Pcbnew,10.0.3*
+G04 #@! TF.CreationDate,2026-08-01T22:41:26-04:00*
+G04 #@! TF.ProjectId,sln-geo-aux-heat,736c6e2d-6765-46f2-9d61-75782d686561,rev?*
+G04 #@! TF.SameCoordinates,Original*
+G04 #@! TF.FileFunction,Profile,NP*
+%FSLAX46Y46*%
+G04 Gerber Fmt 4.6, Leading zero omitted, Abs format (unit mm)*
+G04 Created by KiCad (PCBNEW 10.0.3) date 2026-08-01 22:41:26*
+%MOMM*%
+%LPD*%
+G01*
+G04 APERTURE LIST*
+G04 #@! TA.AperFunction,Profile*
+%ADD10C,0.050000*%
+G04 #@! TD*
+G04 APERTURE END LIST*
+D10*
+X1500000Y-2500000D02*
+X98000000Y-2500000D01*
+X98000000Y-69000000D01*
+X1500000Y-69000000D01*
+X1500000Y-2500000D01*
+M02*

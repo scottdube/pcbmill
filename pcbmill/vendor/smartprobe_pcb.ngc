@@ -1,0 +1,99 @@
+( Rectangular Probing - PathPilot-safe version, rev 3.2                 )
+(                                                                       )
+( Probes a grid and logs each point as a G1 line, in the ACTIVE WCS.    )
+(                                                                       )
+( GEOMETRY - the grid starts at #1,#4 and runs POSITIVE:                )
+(     X: #1 to #1 + #2*[#3-1]                                           )
+(     Y: #4 to #4 + #5*[#6-1]                                           )
+( For PCB work the origin must match FlatCAM's G-code origin.           )
+(                                                                       )
+( Z SETUP - #7 is measured ABOVE the WCS Z zero; the machine must have  )
+( that much Z+ travel left after you zero on the part. #8 is the probe  )
+( depth LIMIT: G38.2 aborts the program if it finds nothing by then.    )
+( Zero Z on the HIGHEST point of the area, set #8 below the LOWEST.     )
+(                                                                       )
+( rev 3.3: flush the log at the end of every row. LOG output is only  )
+(   committed when the file is closed, so an abort mid-run previously  )
+(   lost EVERYTHING. LOGCLOSE + LOGAPPEND each row means you lose at   )
+(   most one row. LOGOPEN truncates, LOGAPPEND preserves.              )
+( rev 3.2: FIXES THE HANG AT EVERY ROW CHANGE.                          )
+(   The serpentine turn makes the first X target of a new row equal to  )
+(   the last X of the previous row, so G38.3 was a zero-length move.    )
+(   PathPilot leaves #5070 stale at 1 for a null probe move, so #12     )
+(   never cleared and the O4 loop spun forever with no motion.          )
+(   #15 now holds the last completed X target and the traverse is       )
+(   skipped when we are already there. #14 is a retry backstop.         )
+( rev 3.1: un-nested the parens in these comments. NO nested parens!    )
+( rev 1: #5070=1 replaced with local flag #12                           )
+( rev 2/3: guarded the G38.5 back-off, contact state tracked in #13     )
+(Configuration section)
+G20   (Inches)
+F10    (probe speed)
+#1=.1    (X start)
+#2=.2    (X increment)
+#3=14    (X count)
+#4=.1    (Y start)
+#5=.2    (Y increment)
+#6=20    (Y count)
+#7=.25   (Z safety, above WCS Z0)
+#8=-.05  (Z probe depth limit, below WCS Z0)
+(SET UP FOR A 70x100mm PCB BLANK = 2.756 x 3.937 inch                  )
+(  X0 Y0 must be the LOWER-LEFT CORNER of the blank, not its centre.   )
+(  Grid runs 0.100 to 2.700 in X, 0.100 to 3.900 in Y - inset 0.1 from )
+(  every edge so the stylus never hangs off the board. 280 points.     )
+(End configuration section)
+(Probe is T99 with length offset 99 - required by Tormach for probing)
+G54
+G43 H99
+(Bare filename - lands in the PathPilot .ini directory. Find it with: )
+(  find / -name probe-results.ngc -newermt today 2>/dev/null )
+(LOGOPEN,probe-results.ngc)
+#9=0 #10=0
+#15=9999                         (last completed X - impossible start)
+G0Z#7
+#13=0                            (0 = probe known clear at safe Z)
+O1 while [#9 lt #6]
+    #10=0
+    G0 Y[#4+#5*#9]
+    O2 while [#10 lt #3]
+        O3 if [[#9/2] - fix[#9/2] eq 0]
+            #11=[#1+#2*#10]
+        O3 else
+            #11=[#1+#2*[#3-#10-1]]
+        O3 endif
+        (#11 is X target)
+        #12=1                    (retry flag)
+        #14=0                    (retry counter)
+        O4 while [#12 NE 0]
+            O5 if [#13 NE 0]
+                G38.5 z#7        (back off, only if we may be in contact)
+            O5 endif
+            O6 if [ABS[#11 - #15] GT .0005]
+                G38.3 x#11       (traverse to next X, stop if it touches)
+                #12=#5070        (1 = tripped during traverse, retry)
+            O6 else
+                #12=0            (already at target - skip the null move)
+            O6 endif
+            #13=#12
+            #14=[#14+1]
+            O7 if [#14 GT 20]
+                (DEBUG, smartprobe: X retry limit hit)
+                #12=0
+            O7 endif
+        O4 endwhile
+        #15=#11
+        G38.2Z#8
+        #13=1                    (probe is in contact with the surface)
+        (LOG,G1 X#5061 Y#5062 Z#5063)
+        #10=[#10+1]
+    O2 endwhile
+    G0Z#7
+    #13=0
+    #9=[#9+1]
+    (LOGCLOSE)
+    (LOGAPPEND,probe-results.ngc)
+O1 endwhile
+(LOGCLOSE)
+G0Z#7
+G0X#1Y#4
+M2

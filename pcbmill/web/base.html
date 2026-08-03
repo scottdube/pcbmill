@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pcbmill{% if job %} - {{ job.data.name }}{% endif %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+  <a class="brand" href="{{ url_for('index') }}">pcbmill</a>
+  {% if job %}<span class="jobname">{{ job.data.name }}</span>{% endif %}
+  <span class="spacer"></span>
+  {% if job %}
+  <form method="post" action="{{ url_for('job_regen', name=job.data.name) }}"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='regenerating…'">
+    <button class="primary" title="pcb2gcode → post → postdrill → applymap ×n, then verify">
+      ⟳ Regenerate all
+    </button>
+  </form>
+  {% endif %}
+</header>
+
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <div class="flashes">
+      {% for msg in messages %}<div class="flash">{{ msg }}</div>{% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+<div class="layout">
+{% if job %}
+<nav class="rail">
+  {% for s in rail %}
+  <a class="stage {% if page == s.key %}active{% endif %}"
+     href="{{ url_for({'inputs':'job_inputs','tools':'job_tools','cam':'job_cam',
+                       'probe':'job_probe','generate':'job_cam','verify':'job_home',
+                       'runsheet':'job_runsheet'}[s.key], name=job.data.name) }}">
+    <span class="badge b-{{ s.badge }}"></span> {{ s.label }}
+    <span class="badge-text t-{{ s.badge }}">{{ {'ready':'ready','stale':'STALE',
+      'missing':'missing','fail':'FAIL','verified':'verified','off':''}[s.badge] }}</span>
+  </a>
+  {% endfor %}
+  <div class="rail-sep"></div>
+  <a class="stage {% if page == 'aux' %}active{% endif %}"
+     href="{{ url_for('job_aux', name=job.data.name) }}">
+    <span class="badge b-off"></span> Aux (stair / clear)
+  </a>
+  <a class="stage" href="{{ url_for('viewer') }}" target="_blank">
+    <span class="badge b-off"></span> Map viewer ↗
+  </a>
+</nav>
+{% endif %}
+<main>
+{% block content %}{% endblock %}
+</main>
+</div>
+</body>
+</html>

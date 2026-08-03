@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Verification</h1>
+
+{% if report %}
+<div class="ready-banner {{ 'ready-yes' if report.ready else 'ready-no' }}">
+  {{ 'JOB READY' if report.ready else 'JOB NOT READY — do not carry these files to the machine' }}
+  <span class="small dim" style="font-weight:400">&nbsp; ran {{ report.ran }}</span>
+</div>
+
+{% for c in report.checks %}
+<details class="check {{ c.status }}" {% if c.status in ('FAIL','WARN') %}open{% endif %}>
+  <summary><span class="status-{{ c.status }}">{{ c.status }}</span>
+    &nbsp;{{ c.id }}. {{ c.name }}</summary>
+  <div class="details">
+    {% for d in c.details %}<div>{{ d }}</div>{% endfor %}
+  </div>
+</details>
+{% endfor %}
+
+<form method="post" action="{{ url_for('job_verify', name=job.data.name) }}" style="margin-top:12px">
+  <button>Re-verify</button>
+  <button name="deep" value="0" title="skips the sliver render">Quick re-verify</button>
+</form>
+
+{% else %}
+<div class="card">
+  <p>No verification has run yet. Set up inputs, CAM and probe, then hit
+  <b>⟳ Regenerate all</b> — the suite runs automatically after every regeneration.</p>
+  <form method="post" action="{{ url_for('job_verify', name=job.data.name) }}">
+    <button>Run verification now</button>
+  </form>
+</div>
+{% endif %}
+
+<h2>Generated files</h2>
+<table>
+  <tr><th>Artifact</th><th>State</th><th>File</th><th>sha256</th></tr>
+  {% for name, state in states.items() %}
+  {% set rec = job.data.artifacts.get(name) %}
+  <tr>
+    <td>{{ name }}</td>
+    <td><span class="{{ {'fresh':'ok-inline','stale':'warn-inline','missing':'dim',
+                         'tampered':'fail-inline','skipped':'dim'}[state] }}">{{ state | upper }}</span></td>
+    <td>{% if rec %}<a class="mono" style="color:var(--accent)"
+          href="{{ url_for('job_file', name=job.data.name, rel=rec.file) }}" target="_blank">{{ rec.file }}</a>{% else %}—{% endif %}</td>
+    <td class="mono dim">{{ rec.sha256[:12] if rec else '' }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="dim small">STALE = a parameter or input changed since generation. TAMPERED = the
+file was edited outside the app (FR1.4). Fix either with ⟳ Regenerate all.</p>
+{% endblock %}

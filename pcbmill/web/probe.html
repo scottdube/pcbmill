@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Probe</h1>
+
+<div class="card">
+<h2 style="margin-top:0">Grid (config block for smartprobe_pcb.ngc)</h2>
+<form class="grid" method="post" action="{{ url_for('job_params', name=job.data.name, group='probe') }}">
+  <label>X start (#1)<input type="text" name="x_start" value="{{ params.probe.x_start if params.probe.x_start is not none else '' }}"></label>
+  <label>X step (#2)<input type="text" name="x_step" value="{{ params.probe.x_step if params.probe.x_step is not none else '' }}"></label>
+  <label>X count (#3)<input type="text" name="x_count" value="{{ params.probe.x_count if params.probe.x_count is not none else '' }}"></label>
+  <label>Y start (#4)<input type="text" name="y_start" value="{{ params.probe.y_start if params.probe.y_start is not none else '' }}"></label>
+  <label>Y step (#5)<input type="text" name="y_step" value="{{ params.probe.y_step if params.probe.y_step is not none else '' }}"></label>
+  <label>Y count (#6)<input type="text" name="y_count" value="{{ params.probe.y_count if params.probe.y_count is not none else '' }}"></label>
+  <label>Z safety #7 (above WCS Z0)<input type="text" name="z_safe" value="{{ params.probe.z_safe }}"></label>
+  <label>Z limit #8 (below WCS Z0)<input type="text" name="z_limit" value="{{ params.probe.z_limit }}"></label>
+  <label>inset from blank edge<input type="text" name="inset" value="{{ params.probe.inset }}"></label>
+  <label>target points<input type="text" name="target_points" value="{{ params.probe.target_points }}"></label>
+  <label>&nbsp;<button class="primary">Save</button></label>
+</form>
+<form method="post" action="{{ url_for('job_probe_plan', name=job.data.name) }}" style="display:inline">
+  <button>Auto-plan grid from blank placement</button>
+</form>
+<form method="post" action="{{ url_for('job_probe_generate', name=job.data.name) }}" style="display:inline">
+  <button class="primary">Generate probe program</button>
+</form>
+{% if prog_exists %}
+  <a class="btn" href="{{ url_for('job_file', name=job.data.name, rel='probe/smartprobe_job.ngc', dl=1) }}">Download smartprobe_job.ngc</a>
+{% endif %}
+<p class="dim small">The motion section is FROZEN (contains the four required
+workarounds #12–#15); only the config block and its derived comments are generated.
+Carry the file to PathPilot, run it with the probe as T99/H99, then bring back
+<span class="mono">probe-results.ngc</span> (bare filename — it lands in the PathPilot ini directory).</p>
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Import probe results</h2>
+<form method="post" action="{{ url_for('job_probe_import', name=job.data.name) }}"
+      enctype="multipart/form-data" style="display:flex;gap:8px">
+  <input type="file" name="file">
+  <input type="text" name="path" placeholder="…or a path on disk" style="width:240px">
+  <button class="primary">Import + QA</button>
+</form>
+</div>
+
+{% if pm %}
+<h2>Map QA {% if pm.qa and not pm.qa.ok %}<span class="fail-inline">— RED FLAGS</span>{% endif %}</h2>
+{% if pm.qa %}
+<table>
+  <tr><th>Points</th><th>Grid</th><th>Extents</th><th>Z span</th>
+      <th>Plane tilt X/Y (in/in)</th><th>Plane residual RMS</th>
+      <th>Local roughness RMS</th><th>Worst point</th></tr>
+  <tr class="mono">
+    <td>{{ pm.qa.points }}</td>
+    <td>{{ pm.qa.grid[0] }}×{{ pm.qa.grid[1] }}</td>
+    <td>X {{ '%.3f' % pm.qa.extents[0] }}–{{ '%.3f' % pm.qa.extents[2] }}<br>
+        Y {{ '%.3f' % pm.qa.extents[1] }}–{{ '%.3f' % pm.qa.extents[3] }}</td>
+    <td>{{ '%.4f' % pm.qa.z.span }} ({{ '%.4f' % pm.qa.z.min }}–{{ '%.4f' % pm.qa.z.max }})</td>
+    <td>{{ '%.5f' % pm.qa.plane.tilt_x_in_per_in }} / {{ '%.5f' % pm.qa.plane.tilt_y_in_per_in }}</td>
+    <td>{{ '%.5f' % pm.qa.plane.residual_rms }}</td>
+    <td class="{{ 'fail-inline' if pm.qa.roughness.rms > params.machine.roughness_rms_limit_in else 'ok-inline' }}">{{ '%.5f' % pm.qa.roughness.rms }}</td>
+    <td>{{ '%.4f' % pm.qa.roughness.worst }}{% if pm.qa.roughness.worst_at %} @ X{{ '%.2f' % pm.qa.roughness.worst_at[0] }} Y{{ '%.2f' % pm.qa.roughness.worst_at[1] }}{% endif %}</td>
+  </tr>
+</table>
+{% for f in pm.qa.flags %}<p class="fail-inline">⚠ {{ f }}</p>{% endfor %}
+<p class="dim small">Roughness (point vs 4-neighbour mean) is the void/bond-failure
+metric — span is not. Limits: RMS &gt; 0.5 thou or any point &gt; 1.5 thou off its
+neighbours = red flag before cutting.</p>
+{% endif %}
+<p>
+  <a class="btn" href="{{ url_for('viewer') }}" target="_blank">Open surface viewer ↗</a>
+  <a class="btn" href="{{ url_for('job_file', name=job.data.name, rel=pm.file, dl=1) }}">Download map</a>
+  <span class="dim small">drag the downloaded map into the viewer (heatmap, contours, 3D, plane fit)</span>
+</p>
+
+{% if touch %}
+<h2>Touch-off assistant (fail-safe: highest map node)</h2>
+<div class="card mono">
+  {% for line in touch.instructions %}<div>{{ line }}</div>{% endfor %}
+</div>
+{% endif %}
+{% else %}
+<p class="dim">No probe map imported yet.</p>
+{% endif %}
+{% endblock %}

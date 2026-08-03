@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>CAM configuration</h1>
+
+<form class="grid" method="post" action="{{ url_for('job_params', name=job.data.name, group='cam') }}">
+  <label>isolation-width (in) — blank = single pass
+    <input type="text" name="isolation_width" value="{{ params.cam.isolation_width if params.cam.isolation_width is not none else '' }}"
+           style="border-color:var(--accent)">
+  </label>
+  <label>zwork (isolation depth)<input type="text" name="zwork" value="{{ params.cam.zwork }}"></label>
+  <label>zsafe<input type="text" name="zsafe" value="{{ params.cam.zsafe }}"></label>
+  <label>zdrill<input type="text" name="zdrill" value="{{ params.cam.zdrill }}"></label>
+  <label>mill-feed IPM<input type="text" name="mill_feed" value="{{ params.cam.mill_feed }}"></label>
+  <label>mill-vertfeed<input type="text" name="mill_vertfeed" value="{{ params.cam.mill_vertfeed }}"></label>
+  <label>mill-speed RPM (max {{ params.machine.spindle_rpm_max }})<input type="text" name="mill_speed" value="{{ params.cam.mill_speed }}"></label>
+  <label>drill-feed IPM<input type="text" name="drill_feed" value="{{ params.cam.drill_feed }}"></label>
+  <label>drill-speed RPM<input type="text" name="drill_speed" value="{{ params.cam.drill_speed }}"></label>
+  <label>milling-overlap<input type="text" name="milling_overlap" value="{{ params.cam.milling_overlap }}"></label>
+  <label>zero-start (0 = fixed frame, recommended)<input type="text" name="zero_start" value="{{ params.cam.zero_start }}"></label>
+  <label>x-offset<input type="text" name="x_offset" value="{{ params.cam.x_offset if params.cam.x_offset is not none else '' }}"></label>
+  <label>y-offset<input type="text" name="y_offset" value="{{ params.cam.y_offset if params.cam.y_offset is not none else '' }}"></label>
+  <label>outline enabled<select name="outline_enabled">
+    <option value="false" {% if not params.cam.outline_enabled %}selected{% endif %}>no (board 1 skipped it)</option>
+    <option value="true" {% if params.cam.outline_enabled %}selected{% endif %}>yes</option></select></label>
+  <label>&nbsp;<button class="primary">Save</button></label>
+</form>
+
+<p class="dim small">isolation-width: a band of width W only fully clears a gap G when
+2·W ≥ G. A single pass leaves floating slivers between pads — the sliver predictor
+(check 9) computes the required width from the actual gap geometry and blocks
+“job ready” if the configured value leaves slivers near solderable pads.
+The autoleveller (al-*) is never emitted — it produces Mach3 G31.</p>
+
+<div class="card">
+<h2 style="margin-top:0">Offset solver (FR5.3)</h2>
+<p class="dim small">Centres the copper on the blank by MEASUREMENT: runs pcb2gcode at
+two trial offsets, reads actual extents from the generated G-code (not the console),
+measures the gain — on this mirrored back-side board x-offset acts in mirrored X, a
+positive value moves the toolpath more negative — then solves and verifies with a
+final run. Takes ~15 s.</p>
+<form method="post" action="{{ url_for('job_solve', name=job.data.name) }}"
+      onsubmit="this.querySelector('button').disabled=true">
+  <button class="primary">Solve offsets by measurement</button>
+</form>
+</div>
+
+<h2>millproject preview (generated on every regeneration)</h2>
+<pre>{{ millproject }}</pre>
+
+<div class="card">
+<h2 style="margin-top:0">applymap mode (§6)</h2>
+<p>Current: <b class="mono">{{ params.machine.applymap_mode }}</b> —
+G54 Z0 on the backer; the map carries absolute copper height.</p>
+<form method="post" action="{{ url_for('job_params', name=job.data.name, group='machine') }}">
+  <select name="applymap_mode">
+    <option value="absolute" {% if params.machine.applymap_mode == 'absolute' %}selected{% endif %}>absolute (normal)</option>
+    <option value="relative" {% if params.machine.applymap_mode == 'relative' %}selected{% endif %}>relative (DANGER)</option>
+  </select>
+  <label class="small warn-inline" style="display:inline-block;margin:0 8px">
+    <input type="checkbox" name="_confirm_relative" value="1">
+    I really zeroed Z on the work surface (forgetting this flag is a 70-thou crash)
+  </label>
+  <button>Set</button>
+</form>
+</div>
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Auxiliary generators</h1>
+
+<h2>Rule areas (region browser)</h2>
+{% if regions %}
+<table>
+  <tr><th>#</th><th>Layer</th><th>Restrictions</th><th class="num">Area mm²</th>
+      <th>G54 bounds</th><th>Map</th><th>Contents</th><th>Clearable</th></tr>
+  {% for r in regions %}
+  <tr>
+    <td>{{ r.index }}</td>
+    <td>{{ r.layer }}</td>
+    <td class="mono small">{% for k, v in r.restrictions.items() %}{{ k }}={{ v }} {% endfor %}</td>
+    <td class="num">{{ '%.1f' % r.area_mm2 }}</td>
+    <td class="mono small">{% if r.g54_bounds %}X {{ '%.3f' % r.g54_bounds[0] }}–{{ '%.3f' % r.g54_bounds[2] }}
+      Y {{ '%.3f' % r.g54_bounds[1] }}–{{ '%.3f' % r.g54_bounds[3] }}{% else %}—{% endif %}</td>
+    <td>{% if r.in_map is defined %}{% if r.in_map %}<span class="ok-inline">inside</span>
+        {% else %}<span class="fail-inline">OUTSIDE MAP</span>{% endif %}{% else %}—{% endif %}</td>
+    <td>{% if r.contents.empty %}<span class="ok-inline">EMPTY — safe to raster</span>
+        {% else %}<span class="fail-inline">HAS COPPER — do NOT raster</span>
+        <span class="dim small">({{ r.contents.footprints | join(', ') or 'no fps' }},
+         {{ r.contents.track_ends }} track ends, {{ r.contents.vias }} vias)</span>{% endif %}</td>
+    <td>{% if r.clearable %}<span class="ok-inline">yes</span>{% else %}<span class="dim">no</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="dim">No .kicad_pcb input (or no rule areas found).</p>
+{% endif %}
+
+<div class="card">
+<h2 style="margin-top:0">Keepout clearing (mkclear — erode by tool radius, serpentine + perimeter)</h2>
+<p class="dim small">Only regions that are full keepouts AND verified EMPTY are accepted.
+The tool is refused if wider than the narrowest region span. Output Z is relative to
+the copper surface — compensate before running.</p>
+<form class="grid" method="post" action="{{ url_for('job_aux_clear', name=job.data.name) }}">
+  <label>Region #
+    <select name="region">
+      {% for r in regions if r.clearable %}<option value="{{ r.index }}">RULE AREA {{ r.index }} ({{ '%.1f' % r.area_mm2 }} mm²)</option>{% endfor %}
+    </select>
+  </label>
+  <label>Tool diameter (in)<input type="text" name="tool_diameter" value="0.125"></label>
+  <label>Commanded depth<input type="text" name="depth" value="0.00133"></label>
+  <label>T-number<input type="text" name="t_number" value="{{ params.tools.outline_t_number }}"></label>
+  <label>&nbsp;<button class="primary">Generate clearing</button></label>
+</form>
+</div>
+
+<div class="card">
+<h2 style="margin-top:0">Depth staircase (mkstair — closed shapes for ohmmeter testing)</h2>
+<p class="dim small">Placement must stay inside the probe map and inside an empty region.
+The generator refuses placements that leave the map.</p>
+<form class="grid" method="post" action="{{ url_for('job_aux_stair', name=job.data.name) }}">
+  <label>X0 (G54)<input type="text" name="x0" value="3.245"></label>
+  <label>Y0 (G54)<input type="text" name="y0" value="0.570"></label>
+  <label>Depths (space-sep)<input type="text" name="depths" value="-0.0010 -0.0015 -0.0020 -0.0025 -0.0030"></label>
+  <label>&nbsp;<button class="primary">Generate staircase</button></label>
+</form>
+</div>
+
+{% if aux_files %}
+<h2>Generated aux files</h2>
+<table>
+  <tr><th>File</th><th></th></tr>
+  {% for f in aux_files %}
+  <tr>
+    <td><a class="mono" style="color:var(--accent)"
+        href="{{ url_for('job_file', name=job.data.name, rel='out/' + f) }}" target="_blank">out/{{ f }}</a></td>
+    <td>
+      {% if not f.endswith('_comp.ngc') %}
+      <form method="post" action="{{ url_for('job_aux_comp', name=job.data.name) }}" style="display:inline">
+        <input type="hidden" name="file" value="{{ f }}">
+        <button>Compensate (applymap)</button>
+      </form>
+      <span class="warn-inline small">uncompensated — do not run on the machine</span>
+      {% else %}
+      <a class="btn" href="{{ url_for('job_file', name=job.data.name, rel='out/' + f, dl=1) }}">Download</a>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

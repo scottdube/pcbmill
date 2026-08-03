@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Probe Surface Viewer",
+  "schemaVersion": 1,
+  "description": "Interactive viewer for CNC probe height maps. Loads a smartprobe probe-results file (G1 X/Y/Z lines) and renders a contoured plan view plus a rotatable 3D surface, in raw height or deviation-from-best-fit-plane. Reports point count, Z range, X/Y tilt, residual peak-to-peak and RMS. Self-contained, no dependencies.",
+  "mcpTools": [],
+  "mcpServerNames": []
+}
+</script>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Probe Surface Map Viewer</title>
+<style>
+  :root { color-scheme: light dark; }
+  .viz-root{
+    color-scheme: light;
+    --surface-1:#fcfcfb; --page:#f9f9f7;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+    --neutral-mid:#f0efec;
+    --pole-cool:#0d366b; --pole-warm:#8f1f1e;
+    --seq-lo:#cde2fb; --seq-hi:#0d366b;
+    --accent:#2a78d6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:where(:not([data-theme="light"])) .viz-root{
+      color-scheme: dark;
+      --surface-1:#1a1a19; --page:#0d0d0d;
+      --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+      --neutral-mid:#383835;
+      --pole-cool:#9ec5f4; --pole-warm:#e66767;
+      --seq-lo:#0d366b; --seq-hi:#9ec5f4;
+      --accent:#3987e5;
+    }
+  }
+  :root[data-theme="dark"] .viz-root{
+    color-scheme: dark;
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --neutral-mid:#383835;
+    --pole-cool:#9ec5f4; --pole-warm:#e66767;
+    --seq-lo:#0d366b; --seq-hi:#9ec5f4;
+    --accent:#3987e5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
+  .viz-root{background:var(--page);color:var(--text-primary);min-height:100vh;padding:24px;}
+  .wrap{max-width:1400px;margin:0 auto;}
+  h1{font-size:20px;font-weight:600;margin:0 0 2px;}
+  .sub{font-size:13px;color:var(--text-secondary);margin:0 0 20px;}
+  .card{background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:16px;}
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;}
+  .stat{background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:12px 16px;min-width:132px;}
+  .stat .lbl{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;}
+  .stat .val{font-size:23px;font-weight:600;line-height:1.1;}
+  .stat .unit{font-size:12px;color:var(--text-secondary);font-weight:400;margin-left:3px;}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;}
+  button,select,label.filebtn{font:inherit;font-size:13px;padding:7px 13px;border-radius:7px;
+    border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);cursor:pointer;}
+  button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:transparent;}
+  input[type=range]{accent-color:var(--accent);width:130px;}
+  .ctl-lbl{font-size:12px;color:var(--text-secondary);}
+  .panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media (max-width:1000px){.panels{grid-template-columns:1fr}}
+  .panel h2{font-size:13px;font-weight:600;margin:0 0 3px;}
+  .panel .cap{font-size:12px;color:var(--text-secondary);margin:0 0 12px;}
+  canvas{display:block;width:100%;height:520px;border-radius:6px;touch-action:none;}
+  .legend{margin-top:12px;}
+  .legend .bar{height:11px;border-radius:3px;border:1px solid var(--border);}
+  .legend .ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);
+    margin-top:5px;font-variant-numeric:tabular-nums;}
+  .tip{position:fixed;pointer-events:none;background:var(--surface-1);color:var(--text-primary);
+    border:1px solid var(--border);border-radius:7px;padding:8px 11px;font-size:12px;
+    box-shadow:0 4px 14px rgba(0,0,0,.14);display:none;z-index:20;font-variant-numeric:tabular-nums;}
+  .drop{border:1.5px dashed var(--axis);border-radius:10px;padding:34px;text-align:center;
+    color:var(--text-secondary);font-size:14px;margin-bottom:16px;}
+  .drop.over{border-color:var(--accent);color:var(--accent);}
+  table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums;}
+  th,td{text-align:right;padding:5px 9px;border-bottom:1px solid var(--grid);}
+  th{color:var(--muted);font-weight:500;text-align:right;position:sticky;top:0;background:var(--surface-1);}
+  th:first-child,td:first-child{text-align:left}
+  .tablewrap{max-height:420px;overflow:auto;margin-top:16px;}
+  .hidden{display:none}
+  .note{font-size:12px;color:var(--text-secondary);margin-top:14px;line-height:1.5;}
+  code{background:var(--grid);padding:1px 5px;border-radius:4px;font-size:11px;}
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap">
+  <h1>Probe Surface Map</h1>
+  <p class="sub" id="sub">Load a <code>probe-results</code> file from smartprobe — lines of <code>G1 X… Y… Z…</code></p>
+
+  <div class="drop" id="drop">
+    Drop a probe-results file here, or
+    <label class="filebtn">choose file<input type="file" id="file" hidden accept=".ngc,.nc,.txt,.tap"></label>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="stats" id="stats"></div>
+
+    <div class="controls">
+      <span class="ctl-lbl">View</span>
+      <button id="mHeight" aria-pressed="true">Height</button>
+      <button id="mDev" aria-pressed="false">Deviation from plane</button>
+      <span style="width:10px"></span>
+      <button id="tContour" aria-pressed="true">Contours</button>
+      <button id="tOrigin" aria-pressed="true">Origin</button>
+      <button id="tTable" aria-pressed="false">Table</button>
+      <span style="width:10px"></span>
+      <span class="ctl-lbl">Z exaggeration</span>
+      <input type="range" id="exag" min="1" max="400" value="120">
+      <span class="ctl-lbl" id="exagV" style="width:44px">×120</span>
+      <span style="flex:1"></span>
+      <button id="theme">Dark / light</button>
+    </div>
+
+    <div class="panels">
+      <div class="card panel">
+        <h2 id="h2a">Plan view</h2>
+        <p class="cap" id="capa">Colour is surface height. Hover for exact values.</p>
+        <canvas id="heat" height="520"></canvas>
+        <div class="legend">
+          <div class="bar" id="bar"></div>
+          <div class="ticks" id="ticks"></div>
+        </div>
+      </div>
+      <div class="card panel">
+        <h2>Surface</h2>
+        <p class="cap">Drag to rotate. Vertical scale is exaggerated by the slider.</p>
+        <canvas id="surf" height="520"></canvas>
+        <p class="note" id="planeNote"></p>
+      </div>
+    </div>
+
+    <div class="card tablewrap hidden" id="tableCard">
+      <table id="tbl"></table>
+    </div>
+
+    <p class="note">
+      <strong>Height</strong> shows the raw probed surface on a single-hue scale.
+      <strong>Deviation from plane</strong> removes the best-fit tilt and shows what is left —
+      curvature, dishing, local defects — on a diverging scale where grey is zero,
+      blue is below the plane and red is above it.
+    </p>
+  </div>
+</div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- colour: OKLab interpolation so ramps are perceptually even ---------- */
+function hex2rgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255];}
+function s2l(c){return c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);}
+function l2s(c){return c<=0.0031308?12.92*c:1.055*Math.pow(c,1/2.4)-0.055;}
+function rgb2oklab(r,g,b){
+  r=s2l(r);g=s2l(g);b=s2l(b);
+  const l=Math.cbrt(0.4122214708*r+0.5363325363*g+0.0514459929*b);
+  const m=Math.cbrt(0.2119034982*r+0.6806995451*g+0.1073969566*b);
+  const s=Math.cbrt(0.0883024619*r+0.2817188376*g+0.6299787005*b);
+  return [0.2104542553*l+0.7936177850*m-0.0040720468*s,
+          1.9779984951*l-2.4285922050*m+0.4505937099*s,
+          0.0259040371*l+0.7827717662*m-0.8086757660*s];
+}
+function oklab2rgb(L,a,bb){
+  const l=Math.pow(L+0.3963377774*a+0.2158037573*bb,3);
+  const m=Math.pow(L-0.1055613458*a-0.0638541728*bb,3);
+  const s=Math.pow(L-0.0894841775*a-1.2914855480*bb,3);
+  let r=+4.0767416621*l-3.3077115913*m+0.2309699292*s;
+  let g=-1.2684380046*l+2.6097574011*m-0.3413193965*s;
+  let b=-0.0041960863*l-0.7034186147*m+1.7076147010*s;
+  const f=v=>Math.max(0,Math.min(255,Math.round(l2s(v)*255)));
+  return [f(r),f(g),f(b)];
+}
+function cssVar(n){return getComputedStyle(document.querySelector('.viz-root')).getPropertyValue(n).trim();}
+function mixOk(h1,h2,t){
+  const A=rgb2oklab.apply(null,hex2rgb(h1)), B=rgb2oklab.apply(null,hex2rgb(h2));
+  const c=oklab2rgb(A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t);
+  return 'rgb('+c[0]+','+c[1]+','+c[2]+')';
+}
+/* sequential: one hue light->dark.  diverging: two hues + neutral grey midpoint. */
+function colourFor(t, mode){          // t in 0..1
+  if(mode==='height') return mixOk(cssVar('--seq-lo'), cssVar('--seq-hi'), t);
+  const mid=cssVar('--neutral-mid');
+  if(t<0.5) return mixOk(cssVar('--pole-cool'), mid, t*2);
+  return mixOk(mid, cssVar('--pole-warm'), (t-0.5)*2);
+}
+
+/* ---------- state ---------- */
+var D=null, mode='height', showContour=true, showOrigin=true, exag=120, az=-0.62, el=0.62, drag=null;
+
+/* ---------- parsing ---------- */
+function parse(text){
+  var pts=[], re=/^\s*G0*1\s+X\s*(-?[\d.]+)\s+Y\s*(-?[\d.]+)\s+Z\s*(-?[\d.]+)/i;
+  text.split(/\r?\n/).forEach(function(l){
+    var m=re.exec(l); if(m) pts.push([+m[1],+m[2],+m[3]]);
+  });
+  if(!pts.length) return null;
+  var xs=Array.from(new Set(pts.map(function(p){return p[0]}))).sort(function(a,b){return a-b});
+  var ys=Array.from(new Set(pts.map(function(p){return p[1]}))).sort(function(a,b){return a-b});
+  var map={}; pts.forEach(function(p){map[p[0]+'|'+p[1]]=p[2]});
+  var Z=ys.map(function(y){return xs.map(function(x){var v=map[x+'|'+y];return v===undefined?NaN:v})});
+  // least-squares plane
+  var n=0,Sx=0,Sy=0,Sz=0,Sxx=0,Syy=0,Sxy=0,Sxz=0,Syz=0;
+  pts.forEach(function(p){var x=p[0],y=p[1],z=p[2];n++;Sx+=x;Sy+=y;Sz+=z;Sxx+=x*x;Syy+=y*y;Sxy+=x*y;Sxz+=x*z;Syz+=y*z;});
+  var M=[[Sxx,Sxy,Sx],[Sxy,Syy,Sy],[Sx,Sy,n]], V=[Sxz,Syz,Sz];
+  var sol=solve3(M,V), pa=sol[0], pb=sol[1], pc=sol[2];
+  var dev=ys.map(function(y,j){return xs.map(function(x,i){return Z[j][i]-(pa*x+pb*y+pc)})});
+  var zf=pts.map(function(p){return p[2]}), df=[].concat.apply([],dev).filter(function(v){return !isNaN(v)});
+  return {pts:pts,xs:xs,ys:ys,Z:Z,dev:dev,
+    zmin:Math.min.apply(null,zf), zmax:Math.max.apply(null,zf),
+    dmin:Math.min.apply(null,df), dmax:Math.max.apply(null,df),
+    rms:Math.sqrt(df.reduce(function(a,v){return a+v*v},0)/df.length),
+    a:pa,b:pb,c:pc,n:n};
+}
+function solve3(M,V){
+  var A=[M[0].concat(V[0]),M[1].concat(V[1]),M[2].concat(V[2])];
+  for(var i=0;i<3;i++){
+    var p=i; for(var r=i+1;r<3;r++) if(Math.abs(A[r][i])>Math.abs(A[p][i])) p=r;
+    var t=A[i];A[i]=A[p];A[p]=t;
+    for(var r2=0;r2<3;r2++){ if(r2===i)continue; var f=A[r2][i]/A[i][i];
+      for(var c=i;c<4;c++) A[r2][c]-=f*A[i][c]; }
+  }
+  return [A[0][3]/A[0][0],A[1][3]/A[1][1],A[2][3]/A[2][2]];
+}
+
+/* ---------- field access ---------- */
+function field(){ return mode==='height'? D.Z : D.dev; }
+function frange(){ return mode==='height'? [D.zmin,D.zmax] : [-Math.max(Math.abs(D.dmin),Math.abs(D.dmax)), Math.max(Math.abs(D.dmin),Math.abs(D.dmax))]; }
+function bilinear(F,fx,fy){
+  var i=Math.min(Math.max(Math.floor(fx),0),D.xs.length-2), j=Math.min(Math.max(Math.floor(fy),0),D.ys.length-2);
+  var tx=fx-i, ty=fy-j;
+  return F[j][i]*(1-tx)*(1-ty)+F[j][i+1]*tx*(1-ty)+F[j+1][i]*(1-tx)*ty+F[j+1][i+1]*tx*ty;
+}
+
+/* ---------- plan view ---------- */
+var heat=document.getElementById('heat'), hctx=heat.getContext('2d');
+var PAD={l:46,r:14,t:14,b:34};
+function xAt(fx){var i=Math.min(Math.floor(fx),D.xs.length-2),t=fx-i;return D.xs[i]+(D.xs[i+1]-D.xs[i])*t;}
+function yAt(fy){var j=Math.min(Math.floor(fy),D.ys.length-2),t=fy-j;return D.ys[j]+(D.ys[j+1]-D.ys[j])*t;}
+function domain(){
+  var x0=Math.min(0,D.xs[0]), x1=Math.max(0,D.xs[D.xs.length-1]);
+  var y0=Math.min(0,D.ys[0]), y1=Math.max(0,D.ys[D.ys.length-1]);
+  var mx=(x1-x0)*0.05, my=(y1-y0)*0.05;
+  return [x0-mx,x1+mx,y0-my,y1+my];
+}
+var DM=null,PW=0,PH=0;
+function sx(x){return PAD.l+(x-DM[0])/(DM[1]-DM[0])*PW;}
+function sy(y){return PAD.t+(1-(y-DM[2])/(DM[3]-DM[2]))*PH;}
+function drawHeat(){
+  var dpr=window.devicePixelRatio||1;
+  var w=heat.clientWidth, h=heat.clientHeight;
+  heat.width=w*dpr; heat.height=h*dpr; hctx.setTransform(dpr,0,0,dpr,0,0);
+  hctx.clearRect(0,0,w,h);
+  PW=w-PAD.l-PAD.r; PH=h-PAD.t-PAD.b; DM=domain();
+  var F=field(), rg=frange(), nx=D.xs.length, ny=D.ys.length;
+  var gx0=sx(D.xs[0]), gx1=sx(D.xs[nx-1]), gy0=sy(D.ys[ny-1]), gy1=sy(D.ys[0]);
+  var OW=560, OH=Math.max(120,Math.round(560*(gy1-gy0)/(gx1-gx0)));
+  var off=document.createElement('canvas'); off.width=OW; off.height=OH;
+  var octx=off.getContext('2d'); var img=octx.createImageData(OW,OH);
+  for(var py=0;py<OH;py++){
+    var fy=(1-py/(OH-1))*(ny-1);
+    for(var px=0;px<OW;px++){
+      var v=bilinear(F,px/(OW-1)*(nx-1),fy);
+      var t=(v-rg[0])/(rg[1]-rg[0]);
+      var m=/rgb\((\d+),(\d+),(\d+)\)/.exec(colourFor(Math.max(0,Math.min(1,t)),mode));
+      var o=(py*OW+px)*4;
+      img.data[o]=+m[1];img.data[o+1]=+m[2];img.data[o+2]=+m[3];img.data[o+3]=255;
+    }
+  }
+  octx.putImageData(img,0,0);
+  hctx.imageSmoothingEnabled=true; hctx.imageSmoothingQuality='high';
+  hctx.drawImage(off,gx0,gy0,gx1-gx0,gy1-gy0);
+  if(showContour) drawContours(F,rg,nx,ny,gx0,gy0,gx1,gy1);
+  hctx.strokeStyle=cssVar('--axis'); hctx.lineWidth=1;
+  hctx.strokeRect(gx0+.5,gy0+.5,gx1-gx0-1,gy1-gy0-1);
+  if(showOrigin) drawTrident2D();
+  hctx.fillStyle=cssVar('--muted'); hctx.font='11px system-ui,sans-serif';
+  hctx.textAlign='center';
+  var xt=[0].concat(D.xs.filter(function(v,i){return i%Math.ceil(nx/5)===0||i===nx-1}));
+  var keptX=[];
+  xt.forEach(function(v){var X=sx(v);
+    if(keptX.every(function(k){return Math.abs(k-X)>34})){keptX.push(X);hctx.fillText(v.toFixed(2),X,h-PAD.b+15);}});
+  hctx.fillText('X (in)',PAD.l+PW/2,h-4);
+  hctx.textAlign='right';
+  var yt=[0].concat(D.ys.filter(function(v,i){return i%Math.ceil(ny/5)===0||i===ny-1}));
+  var keptY=[];
+  yt.forEach(function(v){var Y=sy(v);
+    if(keptY.every(function(k){return Math.abs(k-Y)>18})){keptY.push(Y);hctx.fillText(v.toFixed(2),PAD.l-6,Y+4);}});
+  hctx.save();hctx.translate(11,PAD.t+PH/2);hctx.rotate(-Math.PI/2);
+  hctx.textAlign='center';hctx.fillText('Y (in)',0,0);hctx.restore();
+}
+function drawTrident2D(){
+  var ox=sx(0), oy=sy(0), L=Math.min(PW,PH)*0.11;
+  var ink=cssVar('--text-primary');
+  hctx.save();
+  hctx.strokeStyle=ink; hctx.fillStyle=ink; hctx.lineWidth=2; hctx.globalAlpha=0.85;
+  hctx.beginPath(); hctx.moveTo(ox,oy); hctx.lineTo(ox+L,oy);
+  hctx.moveTo(ox,oy); hctx.lineTo(ox,oy-L); hctx.stroke();
+  function head(x,y,dx,dy){hctx.beginPath();hctx.moveTo(x,y);
+    hctx.lineTo(x-dx*7-dy*4,y-dy*7-dx*4);hctx.lineTo(x-dx*7+dy*4,y-dy*7+dx*4);hctx.closePath();hctx.fill();}
+  head(ox+L,oy,1,0); head(ox,oy-L,0,-1);
+  hctx.beginPath(); hctx.arc(ox,oy,3.5,0,6.284); hctx.fill();
+  hctx.font='600 11px system-ui,sans-serif'; hctx.textAlign='left'; hctx.textBaseline='middle';
+  hctx.fillText('X',ox+L+6,oy);
+  hctx.textAlign='center'; hctx.textBaseline='bottom'; hctx.fillText('Y',ox,oy-L-6);
+  hctx.globalAlpha=0.6; hctx.font='11px system-ui,sans-serif';
+  hctx.textAlign='left'; hctx.textBaseline='top'; hctx.fillText('0,0',ox+6,oy+5);
+  hctx.restore();
+}
+function drawContours(F,rg,nx,ny,gx0,gy0,gx1,gy1){
+  var levels=9, span=rg[1]-rg[0];
+  hctx.save(); hctx.beginPath(); hctx.rect(gx0,gy0,gx1-gx0,gy1-gy0); hctx.clip();
+  hctx.lineWidth=1; hctx.strokeStyle=cssVar('--text-primary'); hctx.globalAlpha=0.22;
+  var RES=3;
+  for(var L=1;L<levels;L++){
+    var lv=rg[0]+span*L/levels;
+    hctx.beginPath();
+    for(var j=0;j<(ny-1)*RES;j++){
+      for(var i=0;i<(nx-1)*RES;i++){
+        var fx0=i/RES, fy0=j/RES, fx1=(i+1)/RES, fy1=(j+1)/RES;
+        var a=bilinear(F,fx0,fy1), b=bilinear(F,fx1,fy1), c=bilinear(F,fx1,fy0), d=bilinear(F,fx0,fy0);
+        var idx=(a>lv?8:0)|(b>lv?4:0)|(c>lv?2:0)|(d>lv?1:0);
+        if(idx===0||idx===15) continue;
+        var X0=sx(xAt(fx0)), X1=sx(xAt(fx1)), Y0=sy(yAt(fy0)), Y1=sy(yAt(fy1));
+        function ip(p,q,vp,vq){var t=(lv-vp)/(vq-vp);return [p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t];}
+        var TL=[X0,Y1],TR=[X1,Y1],BR=[X1,Y0],BL=[X0,Y0];
+        var e={t:ip(TL,TR,a,b), r:ip(TR,BR,b,c), b:ip(BL,BR,d,c), l:ip(TL,BL,a,d)};
+        var segs={1:['l','b'],2:['b','r'],3:['l','r'],4:['t','r'],5:null,6:['t','b'],7:['l','t'],
+                  8:['l','t'],9:['t','b'],10:null,11:['t','r'],12:['l','r'],13:['b','r'],14:['l','b']};
+        var sg=segs[idx]; if(!sg) continue;
+        hctx.moveTo(e[sg[0]][0],e[sg[0]][1]); hctx.lineTo(e[sg[1]][0],e[sg[1]][1]);
+      }
+    }
+    hctx.stroke();
+  }
+  hctx.restore();
+}
+/* ---------- 3D surface ---------- */
+var surf=document.getElementById('surf'), sctx=surf.getContext('2d');
+function drawSurf(){
+  var dpr=window.devicePixelRatio||1;
+  var w=surf.clientWidth, h=surf.clientHeight;
+  surf.width=w*dpr; surf.height=h*dpr; sctx.setTransform(dpr,0,0,dpr,0,0);
+  sctx.clearRect(0,0,w,h);
+  var F=field(), rg=frange(), nx=D.xs.length, ny=D.ys.length;
+  var xr=D.xs[nx-1]-D.xs[0], yr=D.ys[ny-1]-D.ys[0];
+  var sc=Math.min(w/(xr*1.5), h/(yr*1.9));
+  var ca=Math.cos(az), sa=Math.sin(az), ce=Math.cos(el), se=Math.sin(el);
+  function proj(x,y,z){
+    var X=(x-(D.xs[0]+xr/2)), Y=(y-(D.ys[0]+yr/2)), Z=z*exag;
+    var x1=X*ca - Y*sa, y1=X*sa + Y*ca;
+    var y2=y1*ce - Z*se, depth=y1*se + Z*ce;
+    return [w/2 + x1*sc, h/2 + y2*sc*0.62 - 10, depth];
+  }
+  var quads=[];
+  for(var j=0;j<ny-1;j++) for(var i=0;i<nx-1;i++){
+    var P=[[D.xs[i],D.ys[j],F[j][i]],[D.xs[i+1],D.ys[j],F[j][i+1]],
+           [D.xs[i+1],D.ys[j+1],F[j+1][i+1]],[D.xs[i],D.ys[j+1],F[j+1][j!==undefined?i:i]]];
+    P[3]=[D.xs[i],D.ys[j+1],F[j+1][i]];
+    var pr=P.map(function(p){return proj(p[0],p[1],p[2])});
+    var zc=(P[0][2]+P[1][2]+P[2][2]+P[3][2])/4;
+    var dep=(pr[0][2]+pr[1][2]+pr[2][2]+pr[3][2])/4;
+    // shading from facet normal
+    var ux=P[1][0]-P[0][0], uy=P[1][1]-P[0][1], uz=(P[1][2]-P[0][2])*exag;
+    var vx=P[3][0]-P[0][0], vy=P[3][1]-P[0][1], vz=(P[3][2]-P[0][2])*exag;
+    var nx2=uy*vz-uz*vy, ny2=uz*vx-ux*vz, nz2=ux*vy-uy*vx;
+    var ln=Math.sqrt(nx2*nx2+ny2*ny2+nz2*nz2)||1;
+    var lit=Math.abs((nx2*0.4+ny2*0.3+nz2*0.87)/ln);
+    quads.push({pr:pr,z:zc,dep:dep,lit:0.72+0.28*lit});
+  }
+  quads.sort(function(a,b){return a.dep-b.dep});
+  quads.forEach(function(q){
+    var t=(q.z-rg[0])/(rg[1]-rg[0]);
+    var col=colourFor(Math.max(0,Math.min(1,t)),mode);
+    var m=/rgb\((\d+),(\d+),(\d+)\)/.exec(col);
+    sctx.fillStyle='rgb('+Math.round(m[1]*q.lit)+','+Math.round(m[2]*q.lit)+','+Math.round(m[3]*q.lit)+')';
+    sctx.strokeStyle=sctx.fillStyle; sctx.lineWidth=0.6;
+    sctx.beginPath(); sctx.moveTo(q.pr[0][0],q.pr[0][1]);
+    for(var k=1;k<4;k++) sctx.lineTo(q.pr[k][0],q.pr[k][1]);
+    sctx.closePath(); sctx.fill(); sctx.stroke();
+  });
+  if(showOrigin){
+    var L=xr*0.16, ink=cssVar('--text-primary');
+    var o=proj(0,0,0), AX=proj(L,0,0), AY=proj(0,L,0), AZ=proj(0,0,L/exag);
+    sctx.save(); sctx.globalAlpha=0.9; sctx.strokeStyle=ink; sctx.fillStyle=ink; sctx.lineWidth=2;
+    [[AX,'X'],[AY,'Y'],[AZ,'Z']].forEach(function(t){
+      sctx.beginPath(); sctx.moveTo(o[0],o[1]); sctx.lineTo(t[0][0],t[0][1]); sctx.stroke();
+      sctx.font='600 11px system-ui,sans-serif'; sctx.textAlign='center'; sctx.textBaseline='middle';
+      var dx=t[0][0]-o[0], dy=t[0][1]-o[1], n=Math.sqrt(dx*dx+dy*dy)||1;
+      sctx.fillText(t[1], t[0][0]+dx/n*9, t[0][1]+dy/n*9);
+    });
+    sctx.beginPath(); sctx.arc(o[0],o[1],3.5,0,6.284); sctx.fill();
+    sctx.globalAlpha=0.55; sctx.font='11px system-ui,sans-serif';
+    sctx.textAlign='left'; sctx.textBaseline='top'; sctx.fillText('WCS 0,0,0',o[0]+7,o[1]+5);
+    sctx.restore();
+  }
+}
+
+/* ---------- legend, stats, table ---------- */
+function drawLegend(){
+  var rg=frange(), stops=[];
+  for(var i=0;i<=12;i++) stops.push(colourFor(i/12,mode)+' '+(i/12*100).toFixed(0)+'%');
+  document.getElementById('bar').style.background='linear-gradient(90deg,'+stops.join(',')+')';
+  var t=document.getElementById('ticks'); t.innerHTML='';
+  for(var k=0;k<=4;k++){
+    var v=rg[0]+(rg[1]-rg[0])*k/4;
+    var s=document.createElement('span'); s.textContent=(v*1000).toFixed(2)+' thou';
+    t.appendChild(s);
+  }
+}
+function fmt(v,d){return (v*1000).toFixed(d===undefined?2:d);}
+function drawStats(){
+  var s=document.getElementById('stats');
+  var tiltX=D.a*1000, tiltY=D.b*1000;
+  var items=[
+    ['Points', D.n, ''],
+    ['Z range', fmt(D.zmax-D.zmin), 'thou'],
+    ['Tilt in X', (tiltX>=0?'+':'')+tiltX.toFixed(2), 'thou/in'],
+    ['Tilt in Y', (tiltY>=0?'+':'')+tiltY.toFixed(2), 'thou/in'],
+    ['Residual p-p', fmt(D.dmax-D.dmin), 'thou'],
+    ['Residual RMS', fmt(D.rms), 'thou']
+  ];
+  s.innerHTML=items.map(function(it){
+    return '<div class="stat"><div class="lbl">'+it[0]+'</div><div class="val">'+it[1]+
+           (it[2]?'<span class="unit">'+it[2]+'</span>':'')+'</div></div>';
+  }).join('');
+  document.getElementById('planeNote').textContent =
+    'Best-fit plane  Z = '+D.a.toFixed(6)+'·X '+(D.b>=0?'+':'')+D.b.toFixed(6)+'·Y '+
+    (D.c>=0?'+':'')+D.c.toFixed(6)+'  (inches)';
+}
+function drawTable(){
+  var F=field(), rows=['<tr><th>Y \\ X</th>'+D.xs.map(function(x){return '<th>'+x.toFixed(2)+'</th>'}).join('')+'</tr>'];
+  for(var j=D.ys.length-1;j>=0;j--){
+    rows.push('<tr><th>'+D.ys[j].toFixed(2)+'</th>'+
+      D.xs.map(function(x,i){return '<td>'+fmt(F[j][i])+'</td>'}).join('')+'</tr>');
+  }
+  document.getElementById('tbl').innerHTML=rows.join('');
+}
+function redraw(){ drawHeat(); drawSurf(); drawLegend(); drawStats(); drawTable();
+  document.getElementById('h2a').textContent = mode==='height'?'Plan view — height':'Plan view — deviation from plane';
+  document.getElementById('capa').textContent = mode==='height'
+    ? 'Colour is surface height, single hue light to dark. Hover for exact values.'
+    : 'Best-fit tilt removed. Grey is on-plane, blue below, red above. Hover for exact values.';
+}
+
+/* ---------- interaction ---------- */
+var tip=document.getElementById('tip');
+heat.addEventListener('mousemove',function(e){
+  if(!D) return;
+  var r=heat.getBoundingClientRect();
+  var gx0=sx(D.xs[0]), gx1=sx(D.xs[D.xs.length-1]), gy0=sy(D.ys[D.ys.length-1]), gy1=sy(D.ys[0]);
+  var cx=e.clientX-r.left, cy=e.clientY-r.top;
+  if(cx<gx0||cx>gx1||cy<gy0||cy>gy1){tip.style.display='none';return;}
+  var fx=(cx-gx0)/(gx1-gx0)*(D.xs.length-1), fy=(1-(cy-gy0)/(gy1-gy0))*(D.ys.length-1);
+  var i=Math.round(fx), j=Math.round(fy);
+  i=Math.min(Math.max(i,0),D.xs.length-1); j=Math.min(Math.max(j,0),D.ys.length-1);
+  tip.style.display='block'; tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY+14)+'px';
+  tip.innerHTML='<b>X '+D.xs[i].toFixed(3)+'  Y '+D.ys[j].toFixed(3)+'</b><br>'+
+    'height '+fmt(D.Z[j][i])+' thou<br>deviation '+fmt(D.dev[j][i])+' thou';
+});
+heat.addEventListener('mouseleave',function(){tip.style.display='none'});
+surf.addEventListener('pointerdown',function(e){drag={x:e.clientX,y:e.clientY,az:az,el:el};surf.setPointerCapture(e.pointerId);});
+surf.addEventListener('pointermove',function(e){
+  if(!drag) return;
+  az=drag.az+(e.clientX-drag.x)*0.01;
+  el=Math.max(-1.4,Math.min(1.4,drag.el+(e.clientY-drag.y)*0.008));
+  drawSurf();
+});
+surf.addEventListener('pointerup',function(){drag=null});
+
+document.getElementById('mHeight').onclick=function(){mode='height';this.setAttribute('aria-pressed','true');
+  document.getElementById('mDev').setAttribute('aria-pressed','false');redraw();};
+document.getElementById('mDev').onclick=function(){mode='dev';this.setAttribute('aria-pressed','true');
+  document.getElementById('mHeight').setAttribute('aria-pressed','false');redraw();};
+document.getElementById('tContour').onclick=function(){showContour=!showContour;
+  this.setAttribute('aria-pressed',showContour?'true':'false');drawHeat();};
+document.getElementById('tOrigin').onclick=function(){showOrigin=!showOrigin;
+  this.setAttribute('aria-pressed',showOrigin?'true':'false');drawHeat();drawSurf();};
+document.getElementById('tTable').onclick=function(){var c=document.getElementById('tableCard');
+  var on=c.classList.toggle('hidden')===false; this.setAttribute('aria-pressed',on?'true':'false');};
+document.getElementById('exag').oninput=function(){exag=+this.value;
+  document.getElementById('exagV').textContent='×'+exag;drawSurf();};
+document.getElementById('theme').onclick=function(){
+  var r=document.documentElement;
+  r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  redraw();
+};
+window.addEventListener('resize',function(){ if(D) redraw(); });
+
+/* ---------- file loading ---------- */
+function load(text,name){
+  var d=parse(text);
+  if(!d){alert('No "G1 X… Y… Z…" lines found in that file.');return;}
+  D=d;
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('sub').textContent=name+' — '+d.n+' points, '+d.xs.length+' × '+d.ys.length+' grid';
+  document.getElementById('drop').style.padding='14px';
+  document.getElementById('drop').innerHTML='Loaded <b>'+name+'</b> — drop another file to replace, or <label class="filebtn">choose file<input type="file" id="file2" hidden></label>';
+  document.getElementById('file2').addEventListener('change',pick);
+  redraw();
+}
+function pick(e){var f=e.target.files[0]; if(!f) return;
+  var r=new FileReader(); r.onload=function(){load(r.result,f.name)}; r.readAsText(f);}
+document.getElementById('file').addEventListener('change',pick);
+var dz=document.getElementById('drop');
+['dragenter','dragover'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.add('over')})});
+['dragleave','drop'].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.remove('over')})});
+dz.addEventListener('drop',function(e){
+  var f=e.dataTransfer.files[0]; if(!f) return;
+  var r=new FileReader(); r.onload=function(){load(r.result,f.name)}; r.readAsText(f);
+});
+})();
+</script>
+</body>
+</html>

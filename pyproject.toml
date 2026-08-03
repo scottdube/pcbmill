@@ -1,0 +1,24 @@
+[project]
+name = "pcbmill"
+version = "0.1.0"
+description = "Cockpit for milling PCBs on the Tormach 1100MX: wraps pcb2gcode + the proven post/probe/applymap scripts, verifies everything, prints the run sheet."
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pillow>=10.0",
+]
+
+[project.scripts]
+pcbmill = "pcbmill.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pcbmill*"]
+
+[tool.setuptools.package-data]
+pcbmill = ["vendor/*", "web/*"]

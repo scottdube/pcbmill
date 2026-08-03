@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Inputs</h1>
+
+<div class="card">
+<table>
+  <tr><th>Input</th><th>File</th><th></th></tr>
+  {% for key in input_keys %}
+  {% set rec = job.data.inputs.get(key) %}
+  <tr>
+    <td><b>{{ key }}</b>
+      <div class="dim small">
+        {% if key == 'gerber_back' %}B.Cu Gerber — always back=, never front= (pcb2gcode mirrors)
+        {% elif key == 'drill' %}ONE merged Excellon (MixedPlating); split PTH/NPTH is rejected
+        {% elif key == 'kicad_pcb' %}optional — enables region tools, annulus + intake lint
+        {% else %}optional — outline op (skipped on board 1){% endif %}
+      </div>
+    </td>
+    <td class="mono">{{ rec.file if rec else '—' }}</td>
+    <td>
+      <form method="post" action="{{ url_for('job_inputs_set', name=job.data.name) }}"
+            enctype="multipart/form-data" style="display:flex;gap:6px">
+        <input type="hidden" name="key" value="{{ key }}">
+        <input type="file" name="file">
+        <input type="text" name="path" placeholder="…or a path on disk" style="width:180px">
+        <button>Set</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+{% if drill %}
+<h2>Drill file (parsed before anything is generated)</h2>
+{% if drill.error %}
+<p class="fail-inline">parse failed: {{ drill.error }}</p>
+{% else %}
+<p>
+  {% if drill.mixed_plating %}<span class="ok-inline">MixedPlating merged file ✓</span>
+  {% else %}<span class="fail-inline">NOT a merged MixedPlating file — export ONE merged Excellon from KiCad</span>{% endif %}
+  &nbsp; <span class="dim">{{ drill.hole_count }} holes, units {{ drill.units }},
+  extents X {{ '%.4f' % drill.extents_in[0] }}–{{ '%.4f' % drill.extents_in[2] }}
+  Y {{ '%.4f' % drill.extents_in[1] }}–{{ '%.4f' % drill.extents_in[3] }} in</span>
+</p>
+<table>
+  <tr><th>Tool</th><th class="num">Ø in</th><th class="num">Ø mm</th><th>Plating</th><th class="num">Holes</th></tr>
+  {% for t in drill.tools %}
+  <tr>
+    <td>T{{ t.tool }}</td>
+    <td class="num mono">{{ '%.4f' % t.diameter_in }}</td>
+    <td class="num mono">{{ '%.2f' % t.diameter_mm }}</td>
+    <td>{{ t.plating or '?' }}</td>
+    <td class="num">{{ t.holes }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% for w in drill.warnings %}<p class="warn-inline">{{ w }}</p>{% endfor %}
+{% endif %}
+{% endif %}
+
+<h2>Blank placement (G54, inches)</h2>
+<form class="grid" method="post" action="{{ url_for('job_params', name=job.data.name, group='blank') }}">
+  <label>X0 (lower-left, DRO-read)<input type="text" name="x0" value="{{ params.blank.x0 }}"></label>
+  <label>Y0<input type="text" name="y0" value="{{ params.blank.y0 }}"></label>
+  <label>Width<input type="text" name="width" value="{{ params.blank.width }}"></label>
+  <label>Height<input type="text" name="height" value="{{ params.blank.height }}"></label>
+  <label>Thickness<input type="text" name="thickness_in" value="{{ params.blank.thickness_in }}"></label>
+  <label>&nbsp;<button class="primary">Save</button></label>
+</form>
+
+<h2>Job basename</h2>
+<form class="grid" method="post" action="{{ url_for('job_params', name=job.data.name, group='top') }}">
+  <label>basename (pcb2gcode output prefix)<input type="text" name="basename" value="{{ params.basename }}"></label>
+  <label>&nbsp;<button class="primary">Save</button></label>
+</form>
+{% endblock %}

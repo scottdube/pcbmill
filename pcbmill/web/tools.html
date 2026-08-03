@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Tools &amp; feeds</h1>
+
+<div class="card">
+<h2 style="margin-top:0">Job tool assignments</h2>
+<form class="grid" method="post" action="{{ url_for('job_params', name=job.data.name, group='tools') }}">
+  <label>Isolation tool (library id)
+    <select name="isolation_tool">
+      {% for t in lib.tools %}
+      <option value="{{ t.id }}" {% if t.id == params.tools.isolation_tool %}selected{% endif %}>{{ t.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Isolation T-number<input type="text" name="isolation_t_number" value="{{ params.tools.isolation_t_number }}"></label>
+  <label>Drill T-base (605 → 605,606,…)<input type="text" name="drill_t_base" value="{{ params.tools.drill_t_base }}"></label>
+  <label>Outline T-number<input type="text" name="outline_t_number" value="{{ params.tools.outline_t_number }}"></label>
+  <label>drills-available (in, comma-sep)
+    <input type="text" name="_drills" value="{{ params.tools.drills_available | join(',') }}" disabled title="edit via tool library below">
+  </label>
+  <label>&nbsp;<button class="primary">Save</button></label>
+</form>
+<p class="dim small">Convention: T-numbers ≥ 600 are unused PathPilot rows, so M6 prompts
+manually and never fires the ATC. The audit fails any file with a lower number.</p>
+</div>
+
+{% if iso %}
+<div class="card">
+<h2 style="margin-top:0">V-bit kerf (FR3.2 — auto-recomputed, cannot drift)</h2>
+<p class="mono">width = tip + 2·tan(angle/2)·|zwork| =
+  {{ '%.4f' % iso.tip_diameter }} + 2·tan({{ iso.included_angle }}°/2)·{{ '%.4g' % (params.cam.zwork | abs) }}
+  = <b class="ok-inline">{{ '%.4f' % kerf }} in</b></p>
+<p class="dim small">This value is written to mill-diameters on every regeneration.
+Changing zwork automatically changes it — the two were once inconsistent and would
+have eaten every trace.</p>
+</div>
+{% endif %}
+
+<h2>Feeds (chipload window 0.0002–0.0010 in/tooth)</h2>
+<table>
+  <tr><th>Op</th><th class="num">Feed IPM</th><th class="num">Chipload</th><th>Check</th></tr>
+  {% for f in feeds %}
+  <tr>
+    <td>{{ f.label }}</td>
+    <td class="num mono">{{ f.feed }}</td>
+    <td class="num mono">{{ '%.6f' % f.chipload }}</td>
+    <td>{% if f.warn %}<span class="warn-inline">{{ f.warn }}</span>{% else %}<span class="ok-inline">ok</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% if consolidation %}
+<h2>Drill consolidation (pcb2gcode rounds to NEAREST, not up)</h2>
+<table>
+  <tr><th>Excellon</th><th class="num">Nominal</th><th class="num">Bit used</th><th class="num">Signed error</th><th>Flag</th></tr>
+  {% for c in consolidation %}
+  <tr>
+    <td>T{{ c.excellon_tool }}</td>
+    <td class="num mono">{{ '%.4f' % c.nominal_in }}</td>
+    <td class="num mono">{{ '%.4f' % c.chosen_in if c.chosen_in else '—' }}</td>
+    <td class="num mono {{ 'warn-inline' if c.error_in and c.error_in < 0 }}">{{ '%+.4f' % c.error_in if c.error_in is not none else '—' }}</td>
+    <td>{% if c.flag %}<span class="fail-inline">{{ c.flag }}</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% if annulus is not none %}
+  {% if annulus %}
+  <h2 class="fail-inline">Annulus failures — (pad − drill)/2 &lt; {{ params.machine.annulus_min_mm }} mm (no plating: the ring is all there is)</h2>
+  <table>
+    <tr><th>Pad</th><th>Pad size mm</th><th class="num">Bit mm</th><th class="num">Ring mm</th></tr>
+    {% for a in annulus %}
+    <tr><td>{{ a.ref }}</td><td class="mono">{{ a.pad_mm }}</td>
+        <td class="num mono">{{ '%.3f' % a.drill_actual_mm }}</td>
+        <td class="num mono fail-inline">{{ a.annulus_mm }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="ok-inline">Annulus check: all rings ≥ {{ params.machine.annulus_min_mm }} mm ✓</p>
+  {% endif %}
+{% endif %}
+{% endif %}
+
+<h2>Tool library <span class="dim small">({{ lib.path }})</span></h2>
+<table>
+  <tr><th>id</th><th>T#</th><th>Label</th><th>Geometry</th><th>Touch-off</th></tr>
+  {% for t in lib.tools %}
+  <tr>
+    <td class="mono">{{ t.id }}</td>
+    <td>T{{ t.t_number }}</td>
+    <td>{{ t.label }}</td>
+    <td class="mono">{% if t.kind == 'vbit' %}tip {{ t.tip_diameter }}, {{ t.included_angle }}°{% else %}Ø {{ t.diameter }}{% endif %}</td>
+    <td>{{ t.touch_off }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<details class="card">
+<summary>Add / edit a tool</summary>
+<form class="grid" method="post" action="{{ url_for('tools_upsert') }}">
+  <label>id<input type="text" name="id" required></label>
+  <label>kind<select name="kind"><option>vbit</option><option>drill</option><option>endmill</option></select></label>
+  <label>label<input type="text" name="label" required></label>
+  <label>T-number<input type="text" name="t_number" required></label>
+  <label>tip dia (vbit)<input type="text" name="tip_diameter"></label>
+  <label>included angle (vbit)<input type="text" name="included_angle"></label>
+  <label>diameter (drill/endmill)<input type="text" name="diameter"></label>
+  <label>flutes<input type="text" name="flutes" value="2"></label>
+  <label>touch-off<select name="touch_off"><option>electrical</option><option>ets</option></select></label>
+  <label>&nbsp;<button class="primary">Save tool</button></label>
+</form>
+</details>
+{% endblock %}

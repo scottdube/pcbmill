@@ -1,0 +1,63 @@
+# sln-geo-aux-heat milling config, v2
+#
+# Verified against pcb2gcode 3.0.4 (same version you run). Two changes from v1,
+# both necessary; neither works without the other.
+#
+# 1. FIXED COORDINATE FRAME.  v1 had zero-start=1, which derives the origin
+#    from the job's bounding box.  Widening the isolation pushes the outermost
+#    pass ~23 mil further out, which moves that bounding box, which silently
+#    shifts EVERY output including the drill file.  Measured: the drill G-code
+#    moved dX -0.0234, dY +0.0234 in between v1-narrow and v1-wide with
+#    identical drill data.
+#
+#    zero-start=0 with explicit offsets pins the frame.  Verified: the drill
+#    file is byte-identical (md5 5c412c1bfd0d) across single-pass, 0.030
+#    isolation, and two-tool configs.
+#
+#    The offsets below are chosen so this fixed frame lands exactly where your
+#    v1 output landed, which keeps the probe map, kicad_regions.py, the area-1
+#    polygon and the Edge_Cuts profile all valid.  Note x-offset is -MX and
+#    y-offset is MY from kicad_regions.py - same constants, as expected.
+#
+# 2. ISOLATION WIDTH.  v1 cut one pass at the tool width, leaving 7.3 mil from
+#    each ESP32 pad to the surrounding copper plus a floating copper fragment
+#    between adjacent pads.  isolation-width=0.030 clears the whole gap:
+#    measured 19.7 mil pad-to-copper, zero floating fragments.  19.7 mil is
+#    your 0.5 mm pour clearance - that is the ceiling, because past that the
+#    pour is real copper pcb2gcode must keep.  So this reproduces the design.
+#
+#    Cost: isolation goes from 87.2 in / 9.7 min to 456.4 in / 50.7 min at F9.
+#
+#    A second larger mill bit does NOT help - tested.  mill-diameters with
+#    0.0073,0.03125 still runs all 456.4 in on the V-bit and adds 59.1 in on
+#    the second tool.  It does not replace V-bit passes.  Single tool is right.
+
+software=linuxcnc
+
+back=sln-geo-aux-heat-B_Cu.gbr
+drill=sln-geo-aux-heat.drl
+
+output-dir=out
+basename=geoaux
+
+mill-diameters=0.0073
+isolation-width=0.030
+milling-overlap=60%
+zwork=-0.002
+mill-feed=9
+mill-vertfeed=5
+mill-speed=10000
+
+drills-available=0.032,0.0465,0.0625,0.125
+zdrill=-0.075
+drill-feed=25
+drill-speed=10000
+nog81=1
+
+zsafe=0.1
+zchange=1.0
+
+# fixed frame - do NOT reintroduce zero-start
+zero-start=0
+x-offset=-4.3372
+y-offset=3.2478

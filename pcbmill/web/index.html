@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Jobs <span class="dim small">({{ jobs_root }})</span></h1>
+
+{% if jobs %}
+<table>
+  <tr><th>Job</th><th>Created</th><th>State</th></tr>
+  {% for j in jobs %}
+  <tr>
+    <td><a class="btn" href="{{ url_for('job_home', name=j.name) }}">{{ j.name }}</a></td>
+    <td class="dim">{{ j.created }}</td>
+    <td>
+      {% if j.ready %}<span class="ok-inline">READY</span>
+      {% elif j.verified %}<span class="fail-inline">NOT READY</span>
+      {% else %}<span class="dim">unverified</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="dim">No jobs yet.</p>
+{% endif %}
+
+<h2>New job</h2>
+<form method="post" action="{{ url_for('create') }}">
+  <input type="text" name="name" placeholder="job name (e.g. geoaux-r2)" style="width:280px" required>
+  <button class="primary">Create</button>
+</form>
+<p class="dim small">A job is one self-contained directory: inputs/, out/, probe/, job.json.
+Nothing in out/ is ever edited by hand.</p>
+{% endblock %}

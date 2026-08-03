@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Run sheet
+  <button onclick="window.print()" style="float:right">Print</button>
+  <a class="btn" style="float:right;margin-right:8px"
+     href="{{ url_for('job_file', name=job.data.name, rel='out/runsheet.txt', dl=1) }}">Download .txt</a>
+</h1>
+
+{% if not sheet.ready %}
+<div class="ready-banner ready-no">JOB NOT READY — this run sheet is a draft; do not cut from it</div>
+{% endif %}
+
+<h2>Operations (in order)</h2>
+<table>
+  <tr><th>#</th><th>Op</th><th>File</th><th>sha256</th><th>Tool</th><th>T#</th><th>Touch-off</th><th class="num">Est. runtime</th></tr>
+  {% for op in sheet.ops %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td><b>{{ op.op }}</b>{% if op.note %}<div class="dim small">{{ op.note }}</div>{% endif %}</td>
+    <td class="mono">{{ op.file }}</td>
+    <td class="mono dim">{{ op.sha256[:12] }}</td>
+    <td>{{ op.tool }}</td>
+    <td>T{{ op.t_number }}</td>
+    <td class="small">{{ op.touch_off }}</td>
+    <td class="num">{% if op.runtime_min %}~{{ op.runtime_min }} min{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="dim small">Runtime = cut path length ÷ feed × 1.4 corner factor.</p>
+
+{% if sheet.touch_off %}
+<h2>Touch-off numbers (from the probe map)</h2>
+<div class="card mono">
+  {% for line in sheet.touch_off.instructions %}<div>{{ line }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<h2>Pre-flight</h2>
+<div class="card">
+  {% for item in sheet.preflight %}
+  <div style="padding:3px 0">☐ &nbsp;{{ item }}</div>
+  {% endfor %}
+</div>
+{% endblock %}
