@@ -68,6 +68,7 @@ def run(job, deep=True, log=lambda *a: None):
         checks.append(_check(9, "Sliver prediction", "SKIP",
                              "skipped (quick verify) - run full verify"))
     checks.append(_intake_lint(job))
+    checks.append(_frame_check(job, deep, log))
 
     ready = all(c["status"] in ("PASS", "WARN") or c["id"] in NON_BLOCKING
                 for c in checks)
@@ -487,6 +488,41 @@ def _sliver_check(job, dfile, log):
     if rep["warn_count"]:
         return _check(9, "Sliver prediction", "WARN", details)
     return _check(9, "Sliver prediction", "PASS", details)
+
+
+# ------------------------------------------------------------------ 12
+
+def _frame_check(job, deep, log):
+    """FR5.3: always zero-start=0 with explicit offsets, and the frame must
+    not move when isolation-width changes (drill G-code byte-identical)."""
+    from . import camconfig
+    cam = job.params["cam"]
+    details = []
+    if cam.get("zero_start"):
+        return _check(12, "Fixed frame (FR5.3)", "FAIL",
+                      "zero-start=1 is FORBIDDEN: the bounding-box origin "
+                      "silently shifts every output when isolation-width "
+                      "changes. Set x-offset = -MX, y-offset = MY instead.")
+    if cam.get("x_offset") is None or cam.get("y_offset") is None:
+        return _check(12, "Fixed frame (FR5.3)", "FAIL",
+                      "no fixed frame set - set offsets from the KiCad-page "
+                      "transform or run the measurement solver")
+    details.append("zero-start=0, x-offset %.4f, y-offset %.4f"
+                   % (cam["x_offset"], cam["y_offset"]))
+    if not deep:
+        details.append("byte-stability run skipped (quick verify)")
+        return _check(12, "Fixed frame (FR5.3)", "PASS", details)
+    if not (job.input_path("gerber_back") and job.input_path("drill")):
+        details.append("stability run skipped: inputs missing")
+        return _check(12, "Fixed frame (FR5.3)", "WARN", details)
+    log("frame: regenerating at two isolation widths ...")
+    try:
+        ok, msg = camconfig.drill_frame_stability(job)
+    except Exception as e:
+        return _check(12, "Fixed frame (FR5.3)", "FAIL",
+                      details + ["stability run failed: %s" % e])
+    details.append(msg)
+    return _check(12, "Fixed frame (FR5.3)", "PASS" if ok else "FAIL", details)
 
 
 # ------------------------------------------------------------------ 10

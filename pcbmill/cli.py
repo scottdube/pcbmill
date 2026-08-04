@@ -191,6 +191,20 @@ def cmd_touchoff(args):
         print(line)
 
 
+def cmd_frame(args):
+    """FR5.3: set the fixed frame from the KiCad-page transform."""
+    job = _job(args)
+    res = camconfig.set_frame_from_page_transform(job, args.mx, args.my,
+                                                  dx=args.dx, dy=args.dy)
+    print("fixed frame set: x-offset %(x_offset)s, y-offset %(y_offset)s "
+          "(zero-start=0)" % res)
+    if args.verify:
+        ok, msg = camconfig.drill_frame_stability(job)
+        print(msg)
+        if not ok:
+            sys.exit(1)
+
+
 def cmd_solve_offsets(args):
     job = _job(args)
     res = camconfig.solve_offsets(job)
@@ -353,7 +367,20 @@ def main(argv=None):
     s = sub.add_parser("touchoff", help="touch-off assistant (FR4.4)")
     s.set_defaults(fn=cmd_touchoff)
 
-    s = sub.add_parser("solve-offsets", help="measure-based offset solver (FR5.3)")
+    s = sub.add_parser("frame", help="set fixed frame from the KiCad-page "
+                                     "transform (FR5.3): x-offset=-MX, y-offset=MY")
+    s.add_argument("mx", type=float, help="MX constant (board 1: 4.3372)")
+    s.add_argument("my", type=float, help="MY constant (board 1: 3.2478)")
+    s.add_argument("--dx", type=float, default=0.0,
+                   help="blank placement delta X (G54 in, from DRO)")
+    s.add_argument("--dy", type=float, default=0.0)
+    s.add_argument("--verify", action="store_true",
+                   help="prove drill G-code is byte-identical across "
+                        "isolation widths")
+    s.set_defaults(fn=cmd_frame)
+
+    s = sub.add_parser("solve-offsets", help="measure-based placement solver "
+                                             "(centres copper on the blank)")
     s.set_defaults(fn=cmd_solve_offsets)
 
     s = sub.add_parser("regen", help="regenerate ALL artifacts, then verify")

@@ -16,9 +16,8 @@
   <label>drill-feed IPM<input type="text" name="drill_feed" value="{{ params.cam.drill_feed }}"></label>
   <label>drill-speed RPM<input type="text" name="drill_speed" value="{{ params.cam.drill_speed }}"></label>
   <label>milling-overlap<input type="text" name="milling_overlap" value="{{ params.cam.milling_overlap }}"></label>
-  <label>zero-start (0 = fixed frame, recommended)<input type="text" name="zero_start" value="{{ params.cam.zero_start }}"></label>
-  <label>x-offset<input type="text" name="x_offset" value="{{ params.cam.x_offset if params.cam.x_offset is not none else '' }}"></label>
-  <label>y-offset<input type="text" name="y_offset" value="{{ params.cam.y_offset if params.cam.y_offset is not none else '' }}"></label>
+  <label>x-offset (fixed frame)<input type="text" name="x_offset" value="{{ params.cam.x_offset if params.cam.x_offset is not none else '' }}"></label>
+  <label>y-offset (fixed frame)<input type="text" name="y_offset" value="{{ params.cam.y_offset if params.cam.y_offset is not none else '' }}"></label>
   <label>outline enabled<select name="outline_enabled">
     <option value="false" {% if not params.cam.outline_enabled %}selected{% endif %}>no (board 1 skipped it)</option>
     <option value="true" {% if params.cam.outline_enabled %}selected{% endif %}>yes</option></select></label>
@@ -32,15 +31,28 @@
 The autoleveller (al-*) is never emitted — it produces Mach3 G31.</p>
 
 <div class="card">
-<h2 style="margin-top:0">Offset solver (FR5.3)</h2>
-<p class="dim small">Centres the copper on the blank by MEASUREMENT: runs pcb2gcode at
-two trial offsets, reads actual extents from the generated G-code (not the console),
-measures the gain — on this mirrored back-side board x-offset acts in mirrored X, a
-positive value moves the toolpath more negative — then solves and verifies with a
-final run. Takes ~15 s.</p>
+<h2 style="margin-top:0">Coordinate frame (FR5.3) — always zero-start=0, never zero-start=1</h2>
+<p class="dim small">zero-start derives the origin from the job's bounding box, so
+changing isolation-width silently shifts EVERY output including the drill file
+(measured: dX −0.0234, dY +0.0234 between narrow and wide isolation). The fixed
+frame is the KiCad-page transform: <span class="mono">x-offset = −MX,
+y-offset = MY</span> (the kicad_regions.py constants; board 1: 4.3372, 3.2478),
+optionally plus a per-blank placement delta from the DRO-read blank corner.
+Verification check 12 proves the drill G-code is byte-identical across isolation
+widths on every full verify.</p>
+<form class="grid" method="post" action="{{ url_for('job_frame', name=job.data.name) }}">
+  <label>MX<input type="text" name="mx" value="4.3372"></label>
+  <label>MY<input type="text" name="my" value="3.2478"></label>
+  <label>placement delta X (DRO)<input type="text" name="dx" value="0"></label>
+  <label>placement delta Y (DRO)<input type="text" name="dy" value="0"></label>
+  <label>&nbsp;<button class="primary">Set frame from page transform</button></label>
+</form>
+<p class="dim small" style="margin-bottom:4px">Known trap retained: on a mirrored
+back-side board x-offset acts in mirrored X — a positive value moves the toolpath
+more negative. Verify frames by measurement, never by assumption:</p>
 <form method="post" action="{{ url_for('job_solve', name=job.data.name) }}"
-      onsubmit="this.querySelector('button').disabled=true">
-  <button class="primary">Solve offsets by measurement</button>
+      onsubmit="this.querySelector('button').disabled=true" style="display:inline">
+  <button>Solve placement by measurement (centres copper on the blank)</button>
 </form>
 </div>
 

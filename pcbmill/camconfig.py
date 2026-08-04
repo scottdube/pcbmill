@@ -1,10 +1,18 @@
-"""millproject generation + offset solver (FR5).
+"""millproject generation + coordinate frame (FR5).
 
-The offset solver works by MEASUREMENT, not assumption: on a mirrored
+FR5.3: the frame is ALWAYS zero-start=0 with explicit offsets - never
+zero-start=1 (the bounding-box origin silently shifts every output when
+isolation-width changes). The fixed frame is the KiCad-page transform:
+x-offset = -MX, y-offset = MY, the same constants kicad_regions.py uses
+(G54 = M - kicad_mm/25.4, X mirrored), optionally plus a per-blank
+placement delta from the DRO-read blank corner.
+
+Frames are verified by MEASUREMENT, never by assumption: on a mirrored
 back-side board x-offset acts in mirrored X (a positive value moves the
-toolpath more negative), so we run pcb2gcode, read the actual extents out
-of the generated G-code, compute the gain empirically, and verify with a
-final run.
+toolpath more negative). The solver runs pcb2gcode, reads actual extents
+out of the generated G-code, computes the gain empirically, and verifies
+with a final run; drill_frame_stability() proves the frame does not move
+when isolation-width changes (drill G-code byte-identical).
 """
 
 import os
@@ -87,24 +95,27 @@ def build_millproject(job, tool_library=None):
         ]
     lines += [""]
     # NEVER emit al-* options: the autoleveller emits Mach3 G31.
-    if cam["zero_start"]:
-        lines.append("# WARNING: zero-start derives the origin from the job's")
-        lines.append("# bounding box - widening isolation silently shifts every")
-        lines.append("# output. Prefer the fixed frame (offset solver).")
-        lines.append("zero-start=1")
-    else:
-        if cam["x_offset"] is None or cam["y_offset"] is None:
-            raise ValueError(
-                "fixed frame (zero-start=0) needs x_offset/y_offset - run the "
-                "offset solver first")
-        lines += [
-            "# fixed frame - do NOT reintroduce zero-start; widening isolation",
-            "# moves the bounding box and silently shifts every output",
-            "zero-start=0",
-        ]
-    if cam["x_offset"] is not None and cam["y_offset"] is not None:
-        lines += ["x-offset=%.4f" % cam["x_offset"],
-                  "y-offset=%.4f" % cam["y_offset"]]
+    # FR5.3: ALWAYS zero-start=0 with explicit offsets - never zero-start=1.
+    # zero-start derives the origin from the job's bounding box, so anything
+    # that grows the outermost pass (isolation-width!) silently shifts EVERY
+    # output including the drill file.
+    if cam.get("zero_start"):
+        raise ValueError(
+            "zero-start is forbidden (FR5.3): it silently shifts every output "
+            "when isolation-width changes. Set the fixed frame instead "
+            "(x-offset = -MX, y-offset = MY, the kicad_regions.py constants).")
+    if cam["x_offset"] is None or cam["y_offset"] is None:
+        raise ValueError(
+            "fixed frame needs x_offset/y_offset - set them from the "
+            "KiCad-page transform (x-offset = -MX, y-offset = MY) or run "
+            "the measurement solver")
+    lines += [
+        "# fixed frame - do NOT reintroduce zero-start; widening isolation",
+        "# moves the bounding box and silently shifts every output",
+        "zero-start=0",
+        "x-offset=%.4f" % cam["x_offset"],
+        "y-offset=%.4f" % cam["y_offset"],
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -113,6 +124,64 @@ def run_pcb2gcode(job, millproject_path, cwd=None, extra_args=()):
     proc = subprocess.run(cmd, cwd=cwd or job.root,
                           capture_output=True, text=True, timeout=600)
     return proc
+
+
+# ---------------------------------------------------------------- frame
+
+def set_frame_from_page_transform(job, mx, my, dx=0.0, dy=0.0):
+    """FR5.3: x-offset = -(MX+dx), y-offset = MY+dy.
+
+    (MX, MY) are the kicad_regions.py constants (board 1: 4.3372, 3.2478);
+    (dx, dy) is an optional per-blank placement delta in G54 inches from
+    the DRO-read blank corner."""
+    job.params["cam"]["x_offset"] = round(-(mx + dx), 4)
+    job.params["cam"]["y_offset"] = round(my + dy, 4)
+    job.params["cam"]["zero_start"] = 0
+    job.save()
+    return {"x_offset": job.params["cam"]["x_offset"],
+            "y_offset": job.params["cam"]["y_offset"]}
+
+
+def drill_frame_stability(job):
+    """FR5.3 verification: regenerate with a different isolation-width and
+    confirm the drill G-code is byte-identical. Returns (ok, detail)."""
+    iso = job.params["cam"].get("isolation_width")
+    other = 0.030 if not iso else round(iso + 0.010, 4)
+    with tempfile.TemporaryDirectory(prefix="pcbmill-frame-") as td:
+        outs = []
+        for sub, width in (("a", iso), ("b", other)):
+            saved = job.params["cam"].get("isolation_width")
+            try:
+                job.params["cam"]["isolation_width"] = width
+                text = build_millproject(job)
+            finally:
+                job.params["cam"]["isolation_width"] = saved
+            work = os.path.join(td, sub)
+            os.makedirs(os.path.join(work, "out"), exist_ok=True)
+            for key in ("gerber_back", "drill", "edge_cuts"):
+                src = job.input_path(key)
+                if src:
+                    rel = os.path.relpath(src, job.root)
+                    dst = os.path.join(work, rel)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(src, dst)
+            with open(os.path.join(work, "millproject"), "w") as fh:
+                fh.write(text)
+            proc = subprocess.run([PCB2GCODE, "--config", "millproject"],
+                                  cwd=work, capture_output=True, text=True,
+                                  timeout=600)
+            if proc.returncode != 0:
+                return False, "pcb2gcode failed: %s" % proc.stderr[-300:]
+            outs.append(os.path.join(work, "out",
+                                     "%s_drill.ngc" % job.basename))
+        a = open(outs[0], "rb").read()
+        b = open(outs[1], "rb").read()
+        if a == b:
+            return True, ("drill G-code byte-identical at isolation-width "
+                          "%s vs %s - frame is fixed" % (iso, other))
+        return False, ("DRILL G-CODE MOVED between isolation-width %s and %s "
+                       "- the frame is NOT fixed (zero-start leak?)"
+                       % (iso, other))
 
 
 # ---------------------------------------------------------------- solver

@@ -37,7 +37,10 @@ pcbmill status                 # inputs, artifact staleness, readiness
 pcbmill drill-info             # parsed drill table (before anything generates)
 pcbmill consolidate            # drill->bit mapping + annulus check
 pcbmill set cam.isolation_width 0.030
-pcbmill solve-offsets          # measurement-based frame solver (FR5.3)
+pcbmill frame 4.3372 3.2478 --verify   # fixed frame from the KiCad-page
+                               # transform (FR5.3): x-offset=-MX, y-offset=MY;
+                               # --verify proves drill byte-stability
+pcbmill solve-offsets          # measurement-based placement solver
 pcbmill probe-gen              # emit smartprobe program (frozen motion + config)
 pcbmill probe-import probe-results.ngc   # QA: span, plane, roughness
 pcbmill touchoff               # highest-node touch-off + validation nodes
@@ -84,6 +87,10 @@ block "job ready" until you Regenerate all.
    WARN elsewhere. Suggests the minimum isolation-width that zeroes FAILs.
 10. Design intake lint (report-only) — zone clearance, solid pours, round
     pads on fine-pitch rows, pour-exclusion areas
+12. Fixed frame (FR5.3) — zero-start is forbidden (the bounding-box origin
+    silently shifts every output when isolation-width changes); explicit
+    offsets required; full verify regenerates at a second isolation-width
+    and proves the drill G-code is byte-identical
 
 ## Machine conventions baked in (configurable per job)
 
@@ -94,6 +101,10 @@ block "job ready" until you Regenerate all.
   +4.1 thou high vs the work frame); drills use G37/ETS in-program
 - Probe is T99/H99; spindle max 10k RPM; manual-prompt tools ≥ T600
 - The pcb2gcode autoleveller is never emitted (`al-*` produces Mach3 G31)
+- The coordinate frame is always `zero-start=0` with explicit offsets from
+  the KiCad-page transform (`x-offset = −MX`, `y-offset = MY`, optionally a
+  DRO-read placement delta); on this mirrored back-side board x-offset acts
+  in mirrored X — frames are verified by measurement, never assumption
 
 ## Tests
 

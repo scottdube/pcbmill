@@ -279,6 +279,22 @@ def create_app(jobs_root):
             mp = "# not buildable yet: %s" % e
         return render_template("cam.html", millproject=mp, **ctx(job, "cam"))
 
+    @app.post("/job/<name>/frame")
+    def job_frame(name):
+        job = load_job(name)
+        try:
+            res = camconfig.set_frame_from_page_transform(
+                job,
+                float(request.form["mx"]), float(request.form["my"]),
+                dx=float(request.form.get("dx") or 0),
+                dy=float(request.form.get("dy") or 0))
+            flash("fixed frame set: x-offset %(x_offset)s, y-offset "
+                  "%(y_offset)s (zero-start=0). Check 12 will prove drill "
+                  "byte-stability on the next full verify." % res)
+        except Exception as e:
+            flash("failed: %s" % e)
+        return redirect(url_for("job_cam", name=name))
+
     @app.post("/job/<name>/solve-offsets")
     def job_solve(name):
         job = load_job(name)

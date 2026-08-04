@@ -26,9 +26,12 @@ def check(report, cid):
     return next(c for c in report["checks"] if c["id"] == cid)
 
 
-def make_job(tmp, name, iso_width=None, x_offset=-4.2776, y_offset=0.5319,
-             zero_start=1):
-    """Board-1 job with the v1 frame (the one the proven files used)."""
+def make_job(tmp, name, iso_width=None, x_offset=-4.3372, y_offset=3.2478,
+             zero_start=0):
+    """Board-1 job with the FR5.3 fixed frame (x-offset=-MX, y-offset=MY).
+
+    The proven files were cut under the old zero-start frame, which this
+    frame reproduces to within one output quantum (0.05 mil)."""
     job = Job.create(os.path.join(tmp, name), name=name)
     job.params["basename"] = "geoaux"
     job.set_input("gerber_back", os.path.join(FIX, "sln-geo-aux-heat-B_Cu.gbr"))
@@ -63,30 +66,53 @@ def motion_lines(path):
     return out
 
 
+WORD_RE = re.compile(r"([A-Za-z])\s*(-?\d+\.?\d*)")
+
+
+def assert_equivalent(got_path, want_path, tol=2e-4):
+    """Same program, coordinate-for-coordinate, within one output quantum.
+
+    The proven board-1 files were generated under the old zero-start frame;
+    the FR5.3 fixed frame lands 0.05 mil away (bounding-box quantisation),
+    so 'byte-match apart from noise' means: identical structure and word
+    letters, every numeric value within tol."""
+    got = motion_lines(got_path)
+    want = motion_lines(want_path)
+    assert len(got) == len(want), "line count %d != %d" % (len(got), len(want))
+    for lineno, (a, b) in enumerate(zip(got, want), 1):
+        ca = a.split("(")[0]
+        cb = b.split("(")[0]
+        wa = WORD_RE.findall(ca)
+        wb = WORD_RE.findall(cb)
+        assert [w[0] for w in wa] == [w[0] for w in wb], \
+            "line %d: %r vs %r" % (lineno, a, b)
+        for (la, va), (_, vb) in zip(wa, wb):
+            assert abs(float(va) - float(vb)) <= tol, \
+                "line %d word %s: %s vs %s" % (lineno, la, va, vb)
+        if not wa:
+            assert ca.strip() == cb.strip(), "line %d: %r vs %r" % (lineno, a, b)
+
+
 # ------------------------------------------------------------ acceptance 1
 
 def test_board1_back_matches_proven(board1):
-    got = motion_lines(board1.artifact_path("back"))
-    want = motion_lines(os.path.join(FIX, "proven_out", "geoaux_back.ngc"))
-    assert got == want
+    assert_equivalent(board1.artifact_path("back"),
+                      os.path.join(FIX, "proven_out", "geoaux_back.ngc"))
 
 
 def test_board1_drill_matches_proven(board1):
-    got = motion_lines(board1.artifact_path("drillfile"))
-    want = motion_lines(os.path.join(FIX, "proven_out", "geoaux_drill.ngc"))
-    assert got == want
+    assert_equivalent(board1.artifact_path("drillfile"),
+                      os.path.join(FIX, "proven_out", "geoaux_drill.ngc"))
 
 
 def test_board1_back_comp_matches_proven(board1):
-    got = motion_lines(board1.artifact_path("back_comp"))
-    want = motion_lines(os.path.join(FIX, "proven_out", "geoaux_back_comp.ngc"))
-    assert got == want
+    assert_equivalent(board1.artifact_path("back_comp"),
+                      os.path.join(FIX, "proven_out", "geoaux_back_comp.ngc"))
 
 
 def test_board1_drill_comp_matches_proven(board1):
-    got = motion_lines(board1.artifact_path("drill_comp"))
-    want = motion_lines(os.path.join(FIX, "proven_out", "geoaux_drill_comp.ngc"))
-    assert got == want
+    assert_equivalent(board1.artifact_path("drill_comp"),
+                      os.path.join(FIX, "proven_out", "geoaux_drill_comp.ngc"))
 
 
 # ------------------------------------------------------------ acceptance 2
@@ -137,7 +163,7 @@ def test_bug_front_instead_of_back(board1, tmp_path):
 def test_bug_positive_x_offset(tmp_path):
     """Positive x-offset on a mirrored board shoves the toolpath negative -
     extents must fail."""
-    job = make_job(str(tmp_path), "posx", x_offset=+4.2776)
+    job = make_job(str(tmp_path), "posx", x_offset=+4.3372)
     pipeline.regenerate(job, log=lambda *a: None)
     rep = verify.run(job, deep=False)
     assert check(rep, 1)["status"] == "FAIL"
@@ -233,6 +259,37 @@ def test_bug_single_pass_slivers(tmp_path):
     assert esp, "no FAIL slivers found near the ESP32 rows"
     assert sl["suggested_isolation_width_in"] is not None
     assert not rep["ready"]
+
+
+# ------------------------------------------------------------ FR5.3 frame
+
+def test_zero_start_is_forbidden(tmp_path):
+    """FR5.3: build_millproject must refuse zero-start outright."""
+    from pcbmill.camconfig import build_millproject
+    job = make_job(str(tmp_path), "zs", zero_start=1)
+    with pytest.raises(ValueError, match="zero-start is forbidden"):
+        build_millproject(job)
+    rep = verify.run(job, deep=False)
+    assert check(rep, 12)["status"] == "FAIL"
+    assert not rep["ready"]
+
+
+def test_frame_from_page_transform(tmp_path):
+    from pcbmill.camconfig import set_frame_from_page_transform
+    job = make_job(str(tmp_path), "frame")
+    res = set_frame_from_page_transform(job, 4.3372, 3.2478, dx=0.1, dy=-0.05)
+    assert res["x_offset"] == -4.4372
+    assert res["y_offset"] == 3.1978
+    assert job.params["cam"]["zero_start"] == 0
+
+
+def test_frame_stability_across_isolation_widths(tmp_path):
+    """FR5.3 verification: drill G-code byte-identical when isolation-width
+    changes - the frame does not move."""
+    from pcbmill.camconfig import drill_frame_stability
+    job = make_job(str(tmp_path), "stab")
+    ok, msg = drill_frame_stability(job)
+    assert ok, msg
 
 
 # ------------------------------------------------------------ acceptance 4
