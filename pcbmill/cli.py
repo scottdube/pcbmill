@@ -5,7 +5,7 @@ import json
 import os
 import sys
 
-from . import camconfig, pipeline, probegen, runsheet, verify
+from . import camconfig, deploy as deploy_mod, pipeline, probegen, runsheet, verify
 from .excellon import DrillFile
 from .kicadpcb import Board
 from .manifest import ARTIFACTS, Job
@@ -245,6 +245,14 @@ def cmd_runsheet(args):
     print("(saved to %s)" % out)
 
 
+def cmd_deploy(args):
+    job = _job(args)
+    try:
+        deploy_mod.deploy(job, force=args.force, dry_run=args.dry_run)
+    except deploy_mod.DeployError as e:
+        sys.exit("deploy refused: %s" % e)
+
+
 def cmd_tools(args):
     lib = ToolLibrary()
     print("tool library (%s):" % lib.path)
@@ -349,6 +357,13 @@ def main(argv=None):
 
     s = sub.add_parser("consolidate", help="drill size mapping + annulus check")
     s.set_defaults(fn=cmd_consolidate)
+
+    s = sub.add_parser("deploy", help="copy runnable G-code to machine.gcode_dir")
+    s.add_argument("--dry-run", action="store_true",
+                   help="print what would be copied, touch nothing")
+    s.add_argument("--force", action="store_true",
+                   help="deploy even though verification did not pass")
+    s.set_defaults(fn=cmd_deploy)
 
     s = sub.add_parser("set", help="set a job parameter, e.g. cam.isolation_width 0.03")
     s.add_argument("param", help="group.key")

@@ -54,6 +54,11 @@ MACHINE_DEFAULTS = {
     # Design intake lint (FR7.10)
     "zone_clearance_warn_mm": 0.6,
     "th_row_pitch_warn_mm": 2.54,
+
+    # Where `pcbmill deploy` copies runnable G-code. This is the SMB share
+    # PathPilot browses. Note ~/gcode also exists on the Mac, is empty, and
+    # has been untouched since 2024 - it is a decoy, not this.
+    "gcode_dir": "/Volumes/Tormach/gcode",
 }
 
 # PathPilot quirks (informational; enforced by the linter where checkable):

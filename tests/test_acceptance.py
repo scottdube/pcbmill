@@ -14,7 +14,7 @@ import shutil
 
 import pytest
 
-from pcbmill import pipeline, probegen, runsheet, verify
+from pcbmill import deploy, pipeline, probegen, runsheet, verify
 from pcbmill.excellon import DrillFile
 from pcbmill.manifest import Job
 from pcbmill.toollib import (annulus_check, check_feed, consolidate_drills,
@@ -374,6 +374,93 @@ def test_annulus_check_untyped_pads_still_checked():
                                  [0.032, 0.0465, 0.0625, 0.125])
     pads = [{"ref": "J1.1", "pad_size_mm": (1.524, 1.524), "drill_mm": 1.0}]
     assert annulus_check(pads, mapping, annulus_min_mm=0.25)
+
+
+def _deploy_job(tmp_path, ready=True):
+    """Minimal job with a fake probe program + compensated outputs."""
+    job = Job.create(os.path.join(str(tmp_path), "dj"), name="dj")
+    job.params["basename"] = "deskv1"
+    for rel in ("probe/smartprobe_job.ngc", "out/deskv1_back_comp.ngc",
+                "out/deskv1_drill_comp.ngc"):
+        p = job.path(rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as fh:
+            fh.write("(test)\n")
+    job.data["verification"] = {"ready": ready, "checks": [
+        {"id": 1, "status": "PASS" if ready else "FAIL"}]}
+    job.save()
+    return job
+
+
+def test_deploy_names_files_flat_job_op(tmp_path):
+    """Share convention is flat <basename>_<op>.ngc.
+
+    out/ artifacts already carry that shape; only the probe program needs
+    renaming, since inside the job it is probe/smartprobe_job.ngc.
+    """
+    job = _deploy_job(tmp_path)
+    names = [n for _, n in deploy.plan(job)]
+    assert "deskv1_probe.ngc" in names
+    assert "deskv1_back_comp.ngc" in names
+    assert "deskv1_drill_comp.ngc" in names
+    assert "smartprobe_job.ngc" not in names
+
+
+def test_deploy_refuses_when_not_verified(tmp_path):
+    """The share is the last place pcbmill can tell good from broken."""
+    job = _deploy_job(tmp_path, ready=False)
+    job.params["machine"]["gcode_dir"] = str(tmp_path / "share")
+    os.makedirs(job.params["machine"]["gcode_dir"])
+    with pytest.raises(deploy.DeployError, match="verification FAILED"):
+        deploy.deploy(job, log=lambda *a: None)
+    assert not os.listdir(job.params["machine"]["gcode_dir"])
+    # --force is the documented override and must actually work
+    deploy.deploy(job, force=True, log=lambda *a: None)
+    assert sorted(os.listdir(job.params["machine"]["gcode_dir"])) == [
+        "deskv1_back_comp.ngc", "deskv1_drill_comp.ngc", "deskv1_probe.ngc"]
+
+
+def test_deploy_refuses_unmounted_share(tmp_path):
+    """An absent mountpoint must fail loudly, not create a local decoy dir.
+
+    Silently writing to an unmounted /Volumes path looks identical afterwards
+    and means the machine never sees the files.
+    """
+    job = _deploy_job(tmp_path)
+    missing = str(tmp_path / "not-mounted")
+    job.params["machine"]["gcode_dir"] = missing
+    with pytest.raises(deploy.DeployError, match="not a mounted directory"):
+        deploy.deploy(job, log=lambda *a: None)
+    assert not os.path.exists(missing)
+
+
+def test_deploy_dry_run_touches_nothing(tmp_path):
+    job = _deploy_job(tmp_path)
+    share = str(tmp_path / "share")
+    job.params["machine"]["gcode_dir"] = share
+    lines = []
+    deploy.deploy(job, dry_run=True, log=lines.append)
+    assert not os.path.exists(share)
+    assert any("deskv1_probe.ngc" in l for l in lines)
+
+
+def test_deploy_overwrites_without_guard(tmp_path):
+    """PathPilot prompts when a loaded file changes, so overwrite is safe."""
+    job = _deploy_job(tmp_path)
+    share = str(tmp_path / "share")
+    os.makedirs(share)
+    job.params["machine"]["gcode_dir"] = share
+    with open(os.path.join(share, "deskv1_back_comp.ngc"), "w") as fh:
+        fh.write("(old)\n")
+    deploy.deploy(job, log=lambda *a: None)
+    with open(os.path.join(share, "deskv1_back_comp.ngc")) as fh:
+        assert fh.read() == "(test)\n"
+
+
+def test_deploy_needs_something_to_deploy(tmp_path):
+    job = Job.create(os.path.join(str(tmp_path), "empty"), name="empty")
+    with pytest.raises(deploy.DeployError, match="nothing to deploy"):
+        deploy.plan(job)
 
 
 def test_probe_program_generation(tmp_path):
