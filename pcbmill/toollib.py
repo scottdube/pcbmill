@@ -154,13 +154,23 @@ def consolidate_drills(drill_tools, available, undersize_limit=0.002):
 
 
 def annulus_check(pads_with_drills, mapping, annulus_min_mm=0.25):
-    """pads_with_drills: list of {"pad_size_mm": (w,h), "drill_mm": d, "ref": ..}
+    """pads_with_drills: list of
+    {"pad_size_mm": (w,h), "drill_mm": d, "ref": .., "type": ..}
     mapping: consolidate_drills output used to translate nominal->actual bit.
     With no plating the annular ring is all there is: (pad - drill)/2 >= min.
+
+    NPTH pads are SKIPPED. KiCad writes np_thru_hole pads with size == drill
+    (mounting holes, flash-pin clearance holes), so the computed ring is ~0 by
+    construction and every such hole would report a failure on an otherwise
+    healthy board. Filtering here rather than in each caller: the CLI and the
+    web UI had already drifted apart on this, and a check that cries wolf
+    trains people to ignore it.
     """
     by_nominal = {round(m["nominal_in"] * MM_PER_IN, 3): m for m in mapping}
     problems = []
     for p in pads_with_drills:
+        if p.get("type") == "np_thru_hole":
+            continue
         d_nom = round(p["drill_mm"], 3)
         m = by_nominal.get(d_nom)
         actual_mm = (m["chosen_in"] * MM_PER_IN) if m and m["chosen_in"] else p["drill_mm"]

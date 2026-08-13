@@ -107,7 +107,7 @@ def cmd_consolidate(args):
     pcb = job.input_path("kicad_pcb")
     if pcb:
         pads = [{"pad_size_mm": p["size_mm"], "drill_mm": p["drill_mm"],
-                 "ref": "%s.%s" % (p["ref"], p["pad"])}
+                 "ref": "%s.%s" % (p["ref"], p["pad"]), "type": p["type"]}
                 for p in Board(pcb).drilled_pads()]
         problems = annulus_check(
             pads, mapping,

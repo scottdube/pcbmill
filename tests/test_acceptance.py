@@ -17,7 +17,8 @@ import pytest
 from pcbmill import pipeline, probegen, runsheet, verify
 from pcbmill.excellon import DrillFile
 from pcbmill.manifest import Job
-from pcbmill.toollib import (check_feed, consolidate_drills, vbit_kerf)
+from pcbmill.toollib import (annulus_check, check_feed, consolidate_drills,
+                            vbit_kerf)
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -339,6 +340,40 @@ def test_drill_consolidation_rounds_to_nearest():
     t2 = next(m for m in mapping if abs(m["nominal_in"] - 0.0394) < 1e-4)
     assert t2["chosen_in"] == 0.0465 or t2["chosen_in"] == 0.032
     assert t2["error_in"] is not None
+
+
+def test_annulus_check_skips_npth():
+    """NPTH holes must not be annulus-checked.
+
+    KiCad writes np_thru_hole pads with size == drill (mounting holes,
+    ESP32 flash-pin clearance holes), so the ring is ~0 by construction.
+    Before this filter the CLI reported a failure for every mounting hole
+    on an otherwise healthy board, while the web UI - which had its own
+    filter - reported none. A check that cries wolf gets ignored.
+    """
+    mapping = consolidate_drills({1: 3.2 / 25.4, 2: 1.0 / 25.4},
+                                 [0.032, 0.0465, 0.0625, 0.125])
+    pads = [
+        # M3 mounting hole: KiCad emits size == drill
+        {"ref": "H1.1", "pad_size_mm": (3.2, 3.2), "drill_mm": 3.2,
+         "type": "np_thru_hole"},
+        # a real THT pad that genuinely fails: 1.524 pad on a 1.0 nominal
+        # drill snaps up to 1.181 -> ring 0.171 mm
+        {"ref": "J1.1", "pad_size_mm": (1.524, 1.524), "drill_mm": 1.0,
+         "type": "thru_hole"},
+    ]
+    problems = annulus_check(pads, mapping, annulus_min_mm=0.25)
+    refs = {p["ref"] for p in problems}
+    assert "H1.1" not in refs, "NPTH mounting hole must be skipped"
+    assert "J1.1" in refs, "a genuinely thin THT ring must still fail"
+
+
+def test_annulus_check_untyped_pads_still_checked():
+    """Absent a "type" key, fall back to checking - never silently skip."""
+    mapping = consolidate_drills({1: 1.0 / 25.4},
+                                 [0.032, 0.0465, 0.0625, 0.125])
+    pads = [{"ref": "J1.1", "pad_size_mm": (1.524, 1.524), "drill_mm": 1.0}]
+    assert annulus_check(pads, mapping, annulus_min_mm=0.25)
 
 
 def test_probe_program_generation(tmp_path):

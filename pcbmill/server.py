@@ -239,9 +239,8 @@ def create_app(jobs_root):
                     undersize_limit=job.params["machine"]["drill_undersize_limit_in"])
                 if job.input_path("kicad_pcb"):
                     pads = [{"pad_size_mm": p["size_mm"], "drill_mm": p["drill_mm"],
-                             "ref": "%s.%s" % (p["ref"], p["pad"])}
-                            for p in Board(job.input_path("kicad_pcb")).drilled_pads()
-                            if p["type"] == "thru_hole"]
+                             "ref": "%s.%s" % (p["ref"], p["pad"]), "type": p["type"]}
+                            for p in Board(job.input_path("kicad_pcb")).drilled_pads()]
                     annulus = annulus_check(
                         pads, consolidation,
                         annulus_min_mm=job.params["machine"]["annulus_min_mm"])
