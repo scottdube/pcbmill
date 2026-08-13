@@ -119,6 +119,11 @@ def generate_program(probe_params, out_path, log_name="probe-results.ngc"):
 
     # Header comments are DERIVED from the numbers below them - they cannot
     # disagree (stale comments caused real confusion). No nested parens.
+    # The Z-zero line is the one piece of prose here and is therefore the one
+    # thing that CAN go stale: it said "zero on the HIGHEST point of the area"
+    # long after the workflow moved to zeroing on the fixture, contradicting
+    # the vendored header a few lines below it in the same emitted file. Keep
+    # it in step with vendor/smartprobe_pcb.ngc.
     cfg = [
         CONFIG_START,
         "G20   (Inches)",
@@ -138,7 +143,8 @@ def generate_program(probe_params, out_path, log_name="probe-results.ngc"):
         % (p["y_start"], y_end, p["y_count"] - 1, p["y_step"]),
         "(  %d points total. Log file: %s - bare name, PathPilot ini dir)"
         % (n, log_name),
-        "(  Zero Z on the HIGHEST point of the area; #8 below the LOWEST.)",
+        "(  Zero Z on the FIXTURE the work is bonded to - NOT on the work.)",
+        "(  The map then holds real heights above that zero; #8 sits below.)",
         CONFIG_END,
     ]
     text = pre + "\n".join(cfg) + frozen

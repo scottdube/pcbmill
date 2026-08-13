@@ -34,7 +34,15 @@ class DeployError(Exception):
 
 
 def plan(job):
-    """Return [(source_abs, dest_name), ...] without touching the filesystem.
+    """Return [(source_abs, dest_name, gated), ...] without touching disk.
+
+    gated=False for the probe program. It is not a cutting program, and it
+    can never satisfy the verification gate by construction: verify needs
+    regen, regen needs the height map, and the height map needs this very
+    file to have been run on the machine. Gating it would make --force the
+    only way to ship it, which trains people to reach for --force on the one
+    file where the guard matters least - and the habit carries over to the
+    files where it matters most.
 
     Raises DeployError if nothing runnable exists yet.
     """
@@ -42,12 +50,12 @@ def plan(job):
 
     probe = job.artifact_path("probe_program")
     if os.path.exists(probe):
-        items.append((probe, "%s_probe.ngc" % job.basename))
+        items.append((probe, "%s_probe.ngc" % job.basename, False))
 
     for name in RUNNABLE:
         path = job.artifact_path(name)
         if os.path.exists(path):
-            items.append((path, os.path.basename(path)))
+            items.append((path, os.path.basename(path), True))
 
     if not items:
         raise DeployError(
@@ -77,22 +85,32 @@ def deploy(job, force=False, dry_run=False, log=print):
         raise DeployError("machine.gcode_dir is not set")
 
     items = plan(job)
+    skipped = []
 
+    # The gate means "do not CUT unverified G-code". It applies to the
+    # cutting programs only; see plan() for why the probe program is exempt.
     reason = check_ready(job)
     if reason:
-        if not force:
-            raise DeployError(
-                "%s\n  refusing to put unverified G-code on the machine.\n"
-                "  override with --force if you know what you are doing"
-                % reason)
-        log("WARNING: %s" % reason)
-        log("WARNING: deploying anyway because --force was given")
+        if force:
+            log("WARNING: %s" % reason)
+            log("WARNING: deploying cutting programs anyway - --force given")
+        else:
+            skipped = [i for i in items if i[2]]
+            items = [i for i in items if not i[2]]
+            if not items:
+                raise DeployError(
+                    "%s\n  refusing to put unverified cutting G-code on the "
+                    "machine.\n  override with --force if you know what you "
+                    "are doing" % reason)
 
     if dry_run:
         log("would copy to %s:" % dest_dir)
-        for src, name in items:
+        for src, name, _ in items:
             log("  cp %s %s" % (src, os.path.join(dest_dir, name)))
-        return [name for _, name in items]
+        for _, name, _ in skipped:
+            log("  SKIP %s - %s" % (name, reason))
+        return {"written": [n for _, n, _ in items],
+                "skipped": [n for _, n, _ in skipped]}
 
     # Fail loudly on an unmounted share rather than silently creating a plain
     # local directory at the mountpoint, which looks identical afterwards and
@@ -104,7 +122,7 @@ def deploy(job, force=False, dry_run=False, log=print):
             "    pcbmill set machine.gcode_dir <path>" % dest_dir)
 
     written = []
-    for src, name in items:
+    for src, name, _ in items:
         dest = os.path.join(dest_dir, name)
         existed = os.path.exists(dest)
         shutil.copyfile(src, dest)
@@ -114,4 +132,10 @@ def deploy(job, force=False, dry_run=False, log=print):
     log("")
     log("deployed %d file(s) to %s" % (len(written), dest_dir))
     log("PathPilot will prompt to reload any of these it already has open.")
-    return written
+    if skipped:
+        log("")
+        log("NOT deployed - %s:" % reason)
+        for _, name, _ in skipped:
+            log("  SKIPPED %s" % name)
+        log("run 'pcbmill verify' and deploy again before cutting")
+    return {"written": written, "skipped": [n for _, n, _ in skipped]}

@@ -376,18 +376,21 @@ def test_annulus_check_untyped_pads_still_checked():
     assert annulus_check(pads, mapping, annulus_min_mm=0.25)
 
 
-def _deploy_job(tmp_path, ready=True):
+def _deploy_job(tmp_path, ready=True, probe_only=False, name="dj"):
     """Minimal job with a fake probe program + compensated outputs."""
-    job = Job.create(os.path.join(str(tmp_path), "dj"), name="dj")
+    job = Job.create(os.path.join(str(tmp_path), name), name=name)
     job.params["basename"] = "deskv1"
-    for rel in ("probe/smartprobe_job.ngc", "out/deskv1_back_comp.ngc",
-                "out/deskv1_drill_comp.ngc"):
+    rels = ["probe/smartprobe_job.ngc"]
+    if not probe_only:
+        rels += ["out/deskv1_back_comp.ngc", "out/deskv1_drill_comp.ngc"]
+    for rel in rels:
         p = job.path(rel)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "w") as fh:
             fh.write("(test)\n")
-    job.data["verification"] = {"ready": ready, "checks": [
-        {"id": 1, "status": "PASS" if ready else "FAIL"}]}
+    if ready is not None:
+        job.data["verification"] = {"ready": ready, "checks": [
+            {"id": 1, "status": "PASS" if ready else "FAIL"}]}
     job.save()
     return job
 
@@ -399,25 +402,58 @@ def test_deploy_names_files_flat_job_op(tmp_path):
     renaming, since inside the job it is probe/smartprobe_job.ngc.
     """
     job = _deploy_job(tmp_path)
-    names = [n for _, n in deploy.plan(job)]
+    names = [n for _, n, _ in deploy.plan(job)]
     assert "deskv1_probe.ngc" in names
     assert "deskv1_back_comp.ngc" in names
     assert "deskv1_drill_comp.ngc" in names
     assert "smartprobe_job.ngc" not in names
 
 
-def test_deploy_refuses_when_not_verified(tmp_path):
-    """The share is the last place pcbmill can tell good from broken."""
+def test_deploy_probe_program_is_not_gated(tmp_path):
+    """Chicken-and-egg: the probe program can NEVER pass the gate.
+
+    verify needs regen, regen needs the height map, and the height map needs
+    the probe program to have been run on the machine. Gating it would make
+    --force the only way to ship it, training people to bypass the guard on
+    the one file where it matters least.
+    """
+    job = _deploy_job(tmp_path, ready=None, probe_only=True)   # never verified
+    share = str(tmp_path / "share")
+    os.makedirs(share)
+    job.params["machine"]["gcode_dir"] = share
+    res = deploy.deploy(job, log=lambda *a: None)              # no --force
+    assert res["written"] == ["deskv1_probe.ngc"]
+    assert res["skipped"] == []
+    assert os.listdir(share) == ["deskv1_probe.ngc"]
+
+
+def test_deploy_ships_probe_but_holds_cutting_programs(tmp_path):
+    """Unverified job with both: probe goes, cutting programs are held."""
     job = _deploy_job(tmp_path, ready=False)
-    job.params["machine"]["gcode_dir"] = str(tmp_path / "share")
-    os.makedirs(job.params["machine"]["gcode_dir"])
-    with pytest.raises(deploy.DeployError, match="verification FAILED"):
-        deploy.deploy(job, log=lambda *a: None)
-    assert not os.listdir(job.params["machine"]["gcode_dir"])
+    share = str(tmp_path / "share")
+    os.makedirs(share)
+    job.params["machine"]["gcode_dir"] = share
+    res = deploy.deploy(job, log=lambda *a: None)
+    assert res["written"] == ["deskv1_probe.ngc"]
+    assert sorted(res["skipped"]) == ["deskv1_back_comp.ngc",
+                                      "deskv1_drill_comp.ngc"]
+    assert os.listdir(share) == ["deskv1_probe.ngc"]
     # --force is the documented override and must actually work
     deploy.deploy(job, force=True, log=lambda *a: None)
-    assert sorted(os.listdir(job.params["machine"]["gcode_dir"])) == [
+    assert sorted(os.listdir(share)) == [
         "deskv1_back_comp.ngc", "deskv1_drill_comp.ngc", "deskv1_probe.ngc"]
+
+
+def test_deploy_refuses_when_only_cutting_programs_and_unverified(tmp_path):
+    """With nothing ungated to ship, an unverified job is a hard refusal."""
+    job = _deploy_job(tmp_path, ready=False)
+    os.remove(job.path("probe/smartprobe_job.ngc"))
+    share = str(tmp_path / "share")
+    os.makedirs(share)
+    job.params["machine"]["gcode_dir"] = share
+    with pytest.raises(deploy.DeployError, match="unverified cutting G-code"):
+        deploy.deploy(job, log=lambda *a: None)
+    assert not os.listdir(share)
 
 
 def test_deploy_refuses_unmounted_share(tmp_path):

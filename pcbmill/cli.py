@@ -255,9 +255,13 @@ def cmd_runsheet(args):
 def cmd_deploy(args):
     job = _job(args)
     try:
-        deploy_mod.deploy(job, force=args.force, dry_run=args.dry_run)
+        res = deploy_mod.deploy(job, force=args.force, dry_run=args.dry_run)
     except deploy_mod.DeployError as e:
         sys.exit("deploy refused: %s" % e)
+    # Probe-stage deploys have nothing gated and exit 0. A non-zero exit here
+    # means cutting programs existed and were held back.
+    if res["skipped"]:
+        sys.exit(1)
 
 
 def cmd_tools(args):
