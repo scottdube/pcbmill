@@ -272,6 +272,11 @@ def solve_offsets(job, log=print):
     job.params["cam"]["x_offset"] = round(x_off, 4)
     job.params["cam"]["y_offset"] = round(y_off, 4)
     job.params["cam"]["zero_start"] = 0
+    # Persist the measured copper extents: probegen.plan_grid needs them to
+    # guarantee the probe map spans the board. Sizing the grid against the
+    # blank alone leaves it blind to where the copper actually is.
+    job.data["copper_extents"] = {"x0": round(e2[0], 4), "y0": round(e2[1], 4),
+                                  "x1": round(e2[2], 4), "y1": round(e2[3], 4)}
     job.save()
     return {"x_offset": round(x_off, 4), "y_offset": round(y_off, 4),
             "extents": e2, "centre_error_in": round(err, 5)}

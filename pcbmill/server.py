@@ -327,9 +327,13 @@ def create_app(jobs_root):
         blank = job.params["blank"]
         p = job.params["probe"]
         try:
+            ce = job.data.get("copper_extents")
             grid = probegen.plan_grid(blank["x0"], blank["y0"], blank["width"],
                                       blank["height"], p["inset"],
-                                      p["target_points"])
+                                      p["target_points"],
+                                      copper=((ce["x0"], ce["y0"],
+                                               ce["x1"], ce["y1"])
+                                              if ce else None))
             job.update_params("probe", grid)
             flash("planned %dx%d grid" % (grid["x_count"], grid["y_count"]))
         except Exception as e:

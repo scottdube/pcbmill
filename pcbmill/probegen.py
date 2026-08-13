@@ -22,9 +22,31 @@ CONFIG_START = "(Configuration section)"
 CONFIG_END = "(End configuration section)"
 
 
-def plan_grid(x0, y0, width, height, inset, target_points):
+def _floor01(v):
+    """Floor to the 0.01 grid.
+
+    FLOORING, not rounding. A step rounded UP overshoots the usable area,
+    the count guard below then drops a whole row to compensate, and the
+    board loses far more coverage than the fraction of a hundredth that
+    rounding up was worth. Measured on deskv1 (70 mm blank): 0.2656 rounded
+    to 0.27, 11 rows spanned 2.70 > 2.656 usable, the guard cut it to 10
+    rows spanning 2.43, and 0.086 in / 2.2 mm of copper ended up outside
+    the probe map. Flooring to 0.26 keeps 11 rows spanning 2.60 - fits,
+    covers the copper, and hits the target point count exactly.
+    """
+    return math.floor(v * 100 + 1e-9) / 100
+
+
+def plan_grid(x0, y0, width, height, inset, target_points, copper=None):
     """Choose a grid (start/step/count in X and Y) covering the inset blank
-    with roughly target_points, aspect-matched, steps rounded to 0.01."""
+    with roughly target_points, aspect-matched, steps floored to 0.01.
+
+    copper: optional (x0, y0, x1, y1) copper extents in G54 inches, as
+    measured by solve_offsets. When given, the grid is grown to cover the
+    copper and it is an ERROR for it not to - a grid sized only against the
+    blank has no idea where the board actually is, which is how the top edge
+    went uncovered while a row was wasted below the copper.
+    """
     ux = width - 2 * inset
     uy = height - 2 * inset
     if ux <= 0 or uy <= 0:
@@ -32,16 +54,47 @@ def plan_grid(x0, y0, width, height, inset, target_points):
     aspect = ux / uy
     ny = max(2, int(round(math.sqrt(target_points / aspect))))
     nx = max(2, int(round(target_points / ny)))
-    sx = round(ux / (nx - 1), 2)
-    sy = round(uy / (ny - 1), 2)
-    # keep the last row/column on the board after rounding
-    while x0 + inset + sx * (nx - 1) > x0 + width - inset + 1e-9 and nx > 2:
+    sx = _floor01(ux / (nx - 1))
+    sy = _floor01(uy / (ny - 1))
+    if sx <= 0 or sy <= 0:
+        raise ValueError("blank too small for a 0.01 in probe grid")
+    # Flooring means the span can only be <= usable, so these are backstops
+    # for degenerate inputs, no longer the normal path.
+    while nx > 2 and sx * (nx - 1) > ux + 1e-9:
         nx -= 1
-    while y0 + inset + sy * (ny - 1) > y0 + height - inset + 1e-9 and ny > 2:
+    while ny > 2 and sy * (ny - 1) > uy + 1e-9:
         ny -= 1
+
+    gx0, gy0 = x0 + inset, y0 + inset
+    if copper:
+        cx0, cy0, cx1, cy1 = copper
+        while (gx0 + sx * nx <= x0 + width - inset + 1e-9
+               and gx0 + sx * (nx - 1) < cx1 - 1e-9):
+            nx += 1
+        while (gy0 + sy * ny <= y0 + height - inset + 1e-9
+               and gy0 + sy * (ny - 1) < cy1 - 1e-9):
+            ny += 1
+        short = []
+        if gx0 > cx0 + 1e-9:
+            short.append("X low (grid starts %.4f, copper %.4f)" % (gx0, cx0))
+        if gy0 > cy0 + 1e-9:
+            short.append("Y low (grid starts %.4f, copper %.4f)" % (gy0, cy0))
+        if gx0 + sx * (nx - 1) < cx1 - 1e-9:
+            short.append("X high (grid ends %.4f, copper %.4f)"
+                         % (gx0 + sx * (nx - 1), cx1))
+        if gy0 + sy * (ny - 1) < cy1 - 1e-9:
+            short.append("Y high (grid ends %.4f, copper %.4f)"
+                         % (gy0 + sy * (ny - 1), cy1))
+        if short:
+            raise ValueError(
+                "probe grid cannot cover the copper: %s\n"
+                "  the blank dimensions or probe.inset are wrong - the map "
+                "must span every cut, or verify check 1 fails on OUTSIDE "
+                "PROBE MAP" % "; ".join(short))
+
     return {
-        "x_start": round(x0 + inset, 3), "x_step": sx, "x_count": nx,
-        "y_start": round(y0 + inset, 3), "y_step": sy, "y_count": ny,
+        "x_start": round(gx0, 3), "x_step": sx, "x_count": nx,
+        "y_start": round(gy0, 3), "y_step": sy, "y_count": ny,
     }
 
 

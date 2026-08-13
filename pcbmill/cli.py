@@ -151,6 +151,12 @@ def cmd_set(args):
     print("set %s.%s = %r (downstream artifacts are now stale)" % (group, key, val))
 
 
+def _copper_extents(job):
+    """(x0, y0, x1, y1) from solve-offsets, or None if never solved."""
+    ce = job.data.get("copper_extents")
+    return (ce["x0"], ce["y0"], ce["x1"], ce["y1"]) if ce else None
+
+
 def cmd_probe_gen(args):
     job = _job(args)
     p = job.params["probe"]
@@ -158,7 +164,8 @@ def cmd_probe_gen(args):
         blank = job.params["blank"]
         grid = probegen.plan_grid(blank["x0"], blank["y0"], blank["width"],
                                   blank["height"], p["inset"],
-                                  p["target_points"])
+                                  p["target_points"],
+                                  copper=_copper_extents(job))
         job.update_params("probe", grid)
         p = job.params["probe"]
         print("planned grid:", json.dumps(grid))

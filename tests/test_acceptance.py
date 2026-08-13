@@ -463,6 +463,41 @@ def test_deploy_needs_something_to_deploy(tmp_path):
         deploy.plan(job)
 
 
+def test_probe_grid_floors_step_instead_of_dropping_a_row():
+    """deskv1 regression: a rounded-UP step cost a whole row of coverage.
+
+    70 mm blank, inset 0.05: uy = 2.656, ny = 11, and 2.656/10 = 0.2656.
+    Rounding gave 0.27, 11 rows spanned 2.70 > 2.656, the guard dropped ny
+    to 10 spanning 2.43, and 0.086 in / 2.2 mm of copper fell outside the
+    probe map - which verify check 1 rejects as OUTSIDE PROBE MAP.
+    Flooring to 0.26 keeps 11 rows spanning 2.60.
+    """
+    g = probegen.plan_grid(0.316, 0.316, 3.937, 2.756, 0.05, 165)
+    assert g["y_step"] == 0.26
+    assert g["y_count"] == 11
+    y_top = g["y_start"] + g["y_step"] * (g["y_count"] - 1)
+    assert y_top >= 2.882 - 1e-9, "must reach the copper top edge at 2.882"
+    # and the floored grid still fits inside the inset blank
+    assert y_top <= 0.316 + 2.756 - 0.05 + 1e-9
+    assert g["x_count"] * g["y_count"] == 165
+
+
+def test_probe_grid_grows_to_cover_copper():
+    """Given measured copper extents, the grid must span them."""
+    copper = (0.40, 0.40, 4.10, 2.95)
+    g = probegen.plan_grid(0.316, 0.316, 3.937, 2.756, 0.05, 60, copper=copper)
+    assert g["x_start"] + g["x_step"] * (g["x_count"] - 1) >= copper[2] - 1e-9
+    assert g["y_start"] + g["y_step"] * (g["y_count"] - 1) >= copper[3] - 1e-9
+
+
+def test_probe_grid_refuses_copper_it_cannot_cover():
+    """Copper outside the inset blank is a setup error, not something to
+    silently under-probe - verify check 1 would fail later anyway."""
+    copper = (0.40, 0.40, 4.10, 3.40)      # Y beyond the blank entirely
+    with pytest.raises(ValueError, match="cannot cover the copper"):
+        probegen.plan_grid(0.316, 0.316, 3.937, 2.756, 0.05, 165, copper=copper)
+
+
 def test_probe_program_generation(tmp_path):
     params = {"x_start": 0.49, "x_step": 0.27, "x_count": 15,
               "y_start": 0.54, "y_step": 0.26, "y_count": 11,
