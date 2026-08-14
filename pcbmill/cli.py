@@ -151,6 +151,79 @@ def cmd_set(args):
     print("set %s.%s = %r (downstream artifacts are now stale)" % (group, key, val))
 
 
+def cmd_clear(args):
+    """FR8 keepout clearing - the CLI twin of the aux page.
+
+    Aux ops were reachable only through `pcbmill serve`, so clearing a
+    keepout meant importing auxgen in a Python shell and calling applymap by
+    hand. That put the one operation with hard safety refusals on the least
+    scripted path. Generates AND compensates, because an uncompensated aux
+    program is not runnable.
+    """
+    import subprocess
+    from . import auxgen
+    job = _job(args)
+    pcb = job.input_path("kicad_pcb")
+    if not pcb:
+        sys.exit("no kicad_pcb input - 'pcbmill input kicad_pcb <file>' first")
+    board = Board(pcb)
+    try:
+        ra = next(r for r in board.rule_areas() if r["index"] == args.region)
+    except StopIteration:
+        avail = ", ".join(str(r["index"]) for r in board.rule_areas()) or "none"
+        sys.exit("no rule area %d - available: %s" % (args.region, avail))
+
+    # Same two refusals the web path enforces. Rastering a region that holds
+    # copper destroys it; a partial keepout is not a keepout.
+    contents = board.region_contents(ra["polygon_mm"])
+    if not contents["empty"]:
+        sys.exit("REFUSED: region %d HAS COPPER - do not raster" % args.region)
+    copper_keys = ("tracks", "pads", "vias", "copperpour")
+    if not all(ra["restrictions"].get(k) == "not_allowed"
+               for k in copper_keys if k in ra["restrictions"]):
+        sys.exit("REFUSED: region %d is not a full copper keepout"
+                 % args.region)
+
+    cam = job.params["cam"]
+    if cam.get("x_offset") is None:
+        sys.exit("run 'pcbmill solve-offsets' first - the region has to be "
+                 "placed in the same frame as the toolpaths")
+    mx, my = -cam["x_offset"], cam["y_offset"]
+    poly = [(mx - x / MM_PER_IN, my - y / MM_PER_IN)
+            for x, y in ra["polygon_mm"]]
+
+    pm = job.probe_map_path
+    map_bounds = probegen.ProbeMap(pm).extents if pm else None
+    t_number = args.tool_number or job.params["tools"]["outline_t_number"]
+    try:
+        code, region = auxgen.clear_gcode(poly, args.tool, args.depth,
+                                          t_number, map_bounds=map_bounds)
+    except ValueError as e:
+        sys.exit("REFUSED: %s" % e)
+
+    out = job.path("out/clear_area%d.ngc" % args.region)
+    with open(out, "w") as fh:
+        fh.write(code)
+    print("wrote %s (%d-corner inset region, T%d)"
+          % (out, len(region), t_number))
+
+    if not pm:
+        sys.exit("no probe map imported - wrote the UNCOMPENSATED program "
+                 "only. Import one and re-run before cutting.")
+    dst = out.replace(".ngc", "_comp.ngc")
+    proc = subprocess.run(
+        [sys.executable, os.path.join(pipeline.VENDOR, "applymap.py"),
+         "-m", pm, "-i", out, "-o", dst,
+         "--mode", job.params["machine"]["applymap_mode"]],
+        capture_output=True, text=True)
+    if proc.returncode:
+        sys.exit("applymap failed: %s" % proc.stderr[-400:])
+    print("wrote %s" % dst)
+    tail = [l for l in proc.stderr.strip().split("\n") if l]
+    if tail:
+        print("  %s" % tail[-1])
+
+
 def _copper_extents(job):
     """(x0, y0, x1, y1) from solve-offsets, or None if never solved."""
     ce = job.data.get("copper_extents")
@@ -368,6 +441,17 @@ def main(argv=None):
 
     s = sub.add_parser("consolidate", help="drill size mapping + annulus check")
     s.set_defaults(fn=cmd_consolidate)
+
+    s = sub.add_parser("clear", help="FR8: raster-clear a copper keepout "
+                                     "region, then height-compensate it")
+    s.add_argument("region", type=int, help="rule-area index from the .kicad_pcb")
+    s.add_argument("--tool", type=float, required=True,
+                   help="cutter diameter, inches")
+    s.add_argument("--depth", type=float, required=True,
+                   help="cut depth, inches (negative)")
+    s.add_argument("--tool-number", type=int, default=None,
+                   help="T number (default: tools.outline_t_number)")
+    s.set_defaults(fn=cmd_clear)
 
     s = sub.add_parser("deploy", help="copy runnable G-code to machine.gcode_dir")
     s.add_argument("--dry-run", action="store_true",

@@ -11,6 +11,7 @@
 import os
 import re
 import shutil
+import sys
 
 import pytest
 
@@ -497,6 +498,82 @@ def test_deploy_needs_something_to_deploy(tmp_path):
     job = Job.create(os.path.join(str(tmp_path), "empty"), name="empty")
     with pytest.raises(deploy.DeployError, match="nothing to deploy"):
         deploy.plan(job)
+
+
+RAW_ISO = """( pcb2gcode 3.0.4 )
+G94 ( Inches per minute feed rate. )
+G20 ( Units == INCHES. )
+G90 ( Absolute coordinates. )
+G00 S10000 ( RPM spindle speed. )
+G64 P0.00040
+F9.00000 ( Feedrate. )
+G00 Z1.00000
+T1
+M5      (Spindle stop.)
+G04 P1.00000 (Wait for spindle to stop)
+(MSG, Change tool bit to mill diameter 0.00730in)
+M6      (Tool change.)
+M0      (Temporary machine stop.)
+M3 ( Spindle on clockwise. )
+G00 Z0.10000 ( retract )
+G00 X3.98105 Y2.44293 ( rapid move to begin. )
+G01 F5.00000
+G01 Z-0.00200
+"""
+
+
+def _run_post(tmp_path, script, raw):
+    import subprocess
+    p = os.path.join(str(tmp_path), "prog.ngc")
+    with open(p, "w") as fh:
+        fh.write(raw)
+    vendor = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                          "pcbmill", "vendor", script)
+    subprocess.run([sys.executable, vendor, p], check=True,
+                   capture_output=True)
+    return open(p).read()
+
+
+def test_post_measures_the_tool_before_applying_its_length(tmp_path):
+    """post.py emitted a bare G43 with no G37: Z rode on whatever the tool
+    table happened to hold.
+
+    It survived because the isolation pass usually followed something that
+    had just measured the same tool. The OUTLINE goes through this same
+    script and uses a different physical tool from every other op in the
+    job, so an unmeasured G43 there applies the previous tool's length.
+    """
+    out = _run_post(tmp_path, "post.py", RAW_ISO)
+    lines = [l for l in out.split("\n") if re.match(r"^(M0|G37|G43|G30|G00 X)", l)]
+    kinds = [l.split()[0] for l in lines]
+    assert "G37" in kinds, "no ETS measurement before the cut"
+    assert kinds.index("G37") < kinds.index("G43"), \
+        "G43 must not apply a length before G37 measures it"
+    assert kinds.index("M0") < kinds.index("G37"), \
+        "measure only after the operator pause - the tool must be in first"
+    # and the ETS must be cleared, over the work, before any Z move
+    g43 = kinds.index("G43")
+    assert kinds[g43 + 1] == "G30", "no G30 clearing the ETS after G43"
+    assert kinds[g43 + 2] == "G00", "no XY move over the work before descending"
+    # the label must not name a specific tool: this same script post-processes
+    # the V-bit isolation pass and the fishtail profile pass
+    assert "V-bit tool length" not in out
+
+
+def test_post_and_postdrill_agree_on_the_tool_length_block(tmp_path):
+    """The two post-processors must not disagree about ETS handling."""
+    out = _run_post(tmp_path, "post.py", RAW_ISO)
+    assert "G37 H600 (measure this tool on the ETS)" in out
+    assert "G43 H600 (apply the length G37 just stored)" in out
+    assert "G30 (clear of the ETS before descending)" in out
+
+
+def test_job_basename_defaults_to_job_name(tmp_path):
+    """A flat, shared gcode dir means two jobs at the "board" default
+    silently overwrite each other."""
+    job = Job.create(os.path.join(str(tmp_path), "deskv1"))
+    assert job.basename == "deskv1"
+    assert "board" not in job.artifact_path("back_comp")
 
 
 def test_probe_grid_floors_step_instead_of_dropping_a_row():

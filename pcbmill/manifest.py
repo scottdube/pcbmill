@@ -19,6 +19,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import time
 
 from .constants import MACHINE_DEFAULTS
@@ -27,6 +28,12 @@ MANIFEST = "job.json"
 
 # Artifact dependency graph. Each artifact lists the parameter groups and
 # upstream artifacts/inputs that feed it. Order = regeneration order.
+def _safe_basename(name):
+    """Job name -> a basename safe for G-code filenames on the share."""
+    s = re.sub(r"[^A-Za-z0-9_-]+", "_", str(name)).strip("_")
+    return s or "board"
+
+
 ARTIFACTS = {
     "millproject": {
         "params": ["cam", "tools"],
@@ -166,8 +173,9 @@ class Job:
         os.makedirs(job.root, exist_ok=True)
         for sub in ("inputs", "out", "probe", "verify"):
             os.makedirs(os.path.join(job.root, sub), exist_ok=True)
+        job_name = name or os.path.basename(job.root)
         job.data = {
-            "name": name or os.path.basename(job.root),
+            "name": job_name,
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "params": copy.deepcopy(DEFAULT_PARAMS),
             "inputs": {},          # key -> {"file": rel path, "sha256": ...}
@@ -176,6 +184,10 @@ class Job:
             "verification": None,  # last verify report
             "notes": [],
         }
+        # Default the output basename to the job name, not "board". The gcode
+        # share is FLAT and shared across jobs, so two jobs left at the default
+        # both deploy as board_back_comp.ngc and silently overwrite each other.
+        job.data["params"]["basename"] = _safe_basename(job_name)
         job.save()
         return job
 

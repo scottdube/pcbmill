@@ -21,7 +21,13 @@ def stair_gcode(x0, y0, depths=None, width=0.090, height=0.170, gap=0.020,
     L = ["(depth staircase - %d closed rectangles, one per depth)" % len(depths),
          "(Z is RELATIVE to the copper surface - run applymap before use)",
          "G94", "G20", "G90", "G54", "G00 S%d" % rpm, "G64 P0.00020",
-         "G30", "T%d" % t_number, "M5", "G43 H%d" % t_number, "M0", "M3",
+         # G37 before G43, and only after the M0 pause: apply a length that
+         # was actually measured, not whatever the tool table happens to hold.
+         # Same invariant as postdrill.py / post.py / clear_gcode.
+         "G30", "T%d" % t_number, "M5", "M0",
+         "G37 H%d (measure this tool on the ETS)" % t_number,
+         "G43 H%d (apply the length G37 just stored)" % t_number,
+         "G30 (clear of the ETS before descending)", "M3",
          "G04 P1.0"]
     for i, d in enumerate(depths):
         rx0 = x0 + i * (width + gap)

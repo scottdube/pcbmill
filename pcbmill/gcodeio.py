@@ -24,6 +24,9 @@ class GCodeAnalysis:
         self.tools = []             # T numbers in order of appearance
         self.g43_h = []             # H numbers from G43 lines
         self.g37_h = []             # H numbers from G37 lines
+        # ("G37"|"G43", H) in file order. Presence alone is not the invariant:
+        # a G43 that precedes its G37 applies a stale tool-table length.
+        self.tool_len_ops = []
         self.has_g54 = False
         self.has_g30 = False
         self.g30_count = 0
@@ -97,9 +100,11 @@ class GCodeAnalysis:
                     elif gi == 43:
                         if "H" in d:
                             self.g43_h.append(int(d["H"]))
+                            self.tool_len_ops.append(("G43", int(d["H"])))
                     elif gi == 37:
                         if "H" in d:
                             self.g37_h.append(int(d["H"]))
+                            self.tool_len_ops.append(("G37", int(d["H"])))
                     elif gi in (0, 1, 2, 3):
                         motion = gi
 

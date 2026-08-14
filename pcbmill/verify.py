@@ -260,10 +260,22 @@ def _tool_audit(job, analyses):
         for t in ana.tools:
             if t not in ana.g43_h:
                 probs.append("T%d has no matching G43 H%d" % (t, t))
-        if name.startswith("drill"):
-            for t in ana.tools:
-                if t not in ana.g37_h:
-                    probs.append("T%d has no G37 H%d (ETS measure)" % (t, t))
+        # EVERY tool the program changes to must be MEASURED before its length
+        # is applied, and the G37 must PRECEDE the G43 - presence alone is not
+        # the invariant. This was previously required of drill programs only,
+        # so an isolation or outline program that applied an unmeasured length
+        # passed cleanly. The outline is the worst case: the profile cutter is
+        # a different physical tool from every other op in the job, so a stale
+        # length there is the previous tool's.
+        for t in ana.tools:
+            if t not in ana.g37_h:
+                probs.append("T%d has no G37 H%d - applies an UNMEASURED "
+                             "tool length" % (t, t))
+                continue
+            order = [op for op, h in ana.tool_len_ops if h == t]
+            if order and order[0] != "G37":
+                probs.append("T%d applies G43 H%d BEFORE measuring with "
+                             "G37 H%d" % (t, t, t))
         if ana.bare_g01_feed:
             probs.append("bare 'G01 F..' at line(s) %s" %
                          ana.bare_g01_feed[:5])
@@ -271,7 +283,7 @@ def _tool_audit(job, analyses):
             status = "FAIL"
             details.append("%s: %s" % (name, "; ".join(probs)))
         else:
-            details.append("%s: T%s ok, G43/G54/G30 present"
+            details.append("%s: T%s ok, G37-before-G43 / G54 / G30 present"
                            % (name, ",".join(str(t) for t in ana.tools) or "-"))
     return _check(4, "Tool block audit", status, details)
 
