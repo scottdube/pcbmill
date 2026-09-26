@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-from pcbmill import deploy, pipeline, probegen, runsheet, verify
+from pcbmill import deploy, gcodeio, pipeline, probegen, runsheet, verify
 from pcbmill.excellon import DrillFile
 from pcbmill.manifest import Job
 from pcbmill.toollib import (annulus_check, check_feed, consolidate_drills,
@@ -522,14 +522,14 @@ G01 Z-0.00200
 """
 
 
-def _run_post(tmp_path, script, raw):
+def _run_post(tmp_path, script, raw, *args):
     import subprocess
     p = os.path.join(str(tmp_path), "prog.ngc")
     with open(p, "w") as fh:
         fh.write(raw)
     vendor = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                           "pcbmill", "vendor", script)
-    subprocess.run([sys.executable, vendor, p], check=True,
+    subprocess.run([sys.executable, vendor, p, *args], check=True,
                    capture_output=True)
     return open(p).read()
 
@@ -720,3 +720,50 @@ def test_probe_program_header_zeroes_on_the_copper(tmp_path):
     assert "ZERO Z ON THE COPPER" in text.upper(), text[:1500]
     assert "NOT on the work" not in text
     assert "Zero Z on the FIXTURE" not in text
+
+
+# ---------------------------------------------------------------- the isolation
+# cutter is touched off ELECTRICALLY and must NOT be re-measured on the ETS
+# (Scott, 2026-09-26: "are you having it check tool length on all but 600?")
+
+def test_post_electrical_applies_the_touched_off_length_without_g37(tmp_path):
+    """--electrical: the operator has just touched the V-bit off on the copper
+    with a meter. A G37 after that overwrites H600 with an ETS reading that
+    sits +4.1 thou off the work frame, on a 2 thou cut. Apply the length
+    after the M0 (tool in first), and never drive to the ETS."""
+    out = _run_post(tmp_path, "post.py", RAW_ISO, "--electrical")
+    kinds = [l.split()[0] for l in out.split("\n")
+             if re.match(r"^(M0|G37|G43|G30|G00 X)", l)]
+    assert "G37" not in kinds, "electrical touch-off then re-measured on the ETS"
+    assert "G43" in kinds
+    assert kinds.index("M0") < kinds.index("G43"), \
+        "apply the length only after the operator pause"
+    assert "G43 H600" in out
+
+
+def test_pipeline_ets_measures_every_tool_except_the_isolation_cutter(board1):
+    """Drills go through G37 in-program; the isolation program applies the
+    electrically touched-off H600 and never contains a G37."""
+    back = gcodeio.GCodeAnalysis(board1.artifact_path("back"))
+    assert [op for op, _ in back.tool_len_ops] == ["G43"], back.tool_len_ops
+    drill = gcodeio.GCodeAnalysis(board1.artifact_path("drillfile"))
+    assert "G37" in [op for op, _ in drill.tool_len_ops]
+
+
+def test_tool_audit_rejects_g37_on_the_isolation_cutter(board1):
+    """Check 4 must FAIL an isolation program that re-measures the V-bit on
+    the ETS, and PASS the one the pipeline now produces (G43 only)."""
+    rep = verify.run(board1, deep=False)
+    assert check(rep, 4)["status"] == "PASS", check(rep, 4)["details"]
+    path = board1.artifact_path("back")
+    text = open(path).read()
+    assert "G37 H600" not in text
+    text = text.replace("G43 H600", "G37 H600 (measure this tool on the ETS)\nG43 H600", 1)
+    open(path, "w").write(text)
+    try:
+        rep = verify.run(board1, deep=False)
+        assert check(rep, 4)["status"] == "FAIL"
+        assert any("electrical" in d.lower() for d in check(rep, 4)["details"]), \
+            check(rep, 4)["details"]
+    finally:
+        pipeline.regenerate(board1, log=lambda *a: None)

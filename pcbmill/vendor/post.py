@@ -22,7 +22,13 @@ fails.
 import re, sys
 
 N = 600
-p = sys.argv[1] if len(sys.argv) > 1 else 'out/geoaux_back.ngc'
+args = [a for a in sys.argv[1:] if not a.startswith('--')]
+# --electrical: the operator touches this tool off on the copper with a meter
+# (the isolation cutter). Apply the H register after the M0 and NEVER G37 it:
+# the ETS reads +4.1 thou off the work frame, which on a 2 thou cut is the
+# whole cut. Scott, 2026-09-26: G37 "on all but 600".
+ELECTRICAL = '--electrical' in sys.argv[1:]
+p = args[0] if args else 'out/geoaux_back.ngc'
 s = open(p).read()
 s = re.sub(r'^T\d+\s*$', 'T%d' % N, s, count=1, flags=re.M)
 
@@ -37,8 +43,12 @@ if not re.search(r'^G43\b', s, flags=re.M):
     for l in s.split('\n'):
         out.append(l)
         if made == 0 and re.match(r'^M0\b', l):
-            out.append('G37 H%d (measure this tool on the ETS)' % N)
-            out.append('G43 H%d (apply the length G37 just stored)' % N)
+            if ELECTRICAL:
+                out.append('G43 H%d (apply the ELECTRICALLY touched-off length'
+                           ' - no G37, the ETS reads high vs the work frame)' % N)
+            else:
+                out.append('G37 H%d (measure this tool on the ETS)' % N)
+                out.append('G43 H%d (apply the length G37 just stored)' % N)
             made += 1
     if made != 1:
         sys.exit('post: expected 1 G37/G43 insert, made %d - check the file'
@@ -47,12 +57,13 @@ if not re.search(r'^G43\b', s, flags=re.M):
 
     # After G37 the spindle is parked at the ETS, where the program's own
     # "retract" to Z0.1 can be a DESCENT. Clear the ETS and get over the work
-    # before any Z move. Same guard as postdrill.py.
+    # before any Z move. Same guard as postdrill.py. (Not needed without a
+    # G37: the spindle never left the tool-change position.)
     lines, out, i = s.split('\n'), [], 0
     while i < len(lines):
         l = lines[i]
         out.append(l)
-        if re.match(r'^G43 H\d+', l):
+        if not ELECTRICAL and re.match(r'^G43 H\d+', l):
             nxt = None
             for j in range(i + 1, min(i + 40, len(lines))):
                 q = re.match(r'^G0*0\s+(X-?[\d.]+\s+Y-?[\d.]+)', lines[j])

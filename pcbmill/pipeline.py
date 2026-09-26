@@ -83,8 +83,11 @@ def regenerate(job, log=print):
     log("pcb2gcode ok")
 
     # 3. post.py / postdrill.py (vendored, run as proven) -----------------
+    # The isolation cutter is touched off ELECTRICALLY on the copper and is
+    # never re-measured on the ETS (+4.1 thou off the work frame, on a 2 thou
+    # cut). Every other tool - drills, outline cutter - goes through G37.
     _run([PY, os.path.join(VENDOR, "post.py"),
-          os.path.relpath(back, job.root)], job.root, lines)
+          os.path.relpath(back, job.root), "--electrical"], job.root, lines)
     _run([PY, os.path.join(VENDOR, "postdrill.py"),
           os.path.relpath(drill, job.root)], job.root, lines)
 

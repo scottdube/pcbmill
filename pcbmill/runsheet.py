@@ -58,7 +58,8 @@ def build(job):
     if cam.get("outline_enabled"):
         add_gcode_op("outline_comp", "Outline / edge cuts",
                      "end mill", tools["outline_t_number"],
-                     "electrical touch-off", cam["outline_feed"])
+                     "G37/ETS in-program (4.1 thou bias is nothing on a through cut)",
+                     cam["outline_feed"])
 
     touch = None
     if job.probe_map_path and os.path.exists(job.probe_map_path):

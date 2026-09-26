@@ -98,7 +98,9 @@ block "job ready" until you Regenerate all.
   applymap runs in absolute mode (relative mode requires an explicit
   confirmation — its failure mode is a 70-thou crash)
 - Isolation cutter touch-off is **electrical**, mandatory (ETS reads
-  +4.1 thou high vs the work frame); drills use G37/ETS in-program
+  +4.1 thou high vs the work frame), and its program applies H600 with
+  **no G37**; every other tool (drills, outline cutter) is measured by
+  G37/ETS in-program
 - Probe is T99/H99; spindle max 10k RPM; manual-prompt tools ≥ T600
 - The pcb2gcode autoleveller is never emitted (`al-*` produces Mach3 G31)
 - The coordinate frame is always `zero-start=0` with explicit offsets from

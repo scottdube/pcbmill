@@ -267,7 +267,17 @@ def _tool_audit(job, analyses):
         # passed cleanly. The outline is the worst case: the profile cutter is
         # a different physical tool from every other op in the job, so a stale
         # length there is the previous tool's.
+        # EXCEPT the isolation cutter: it is touched off ELECTRICALLY on the
+        # copper (the ETS reads +4.1 thou off the work frame, and the cut is
+        # 2 thou), so a G37 there OVERWRITES the touch-off with the wrong
+        # number. G43 only, and any G37 for it is a FAIL.
         for t in ana.tools:
+            if t == iso_t:
+                if t in ana.g37_h:
+                    probs.append("T%d has G37 H%d - overwrites the ELECTRICAL "
+                                 "touch-off of the isolation cutter with an "
+                                 "ETS reading" % (t, t))
+                continue
             if t not in ana.g37_h:
                 probs.append("T%d has no G37 H%d - applies an UNMEASURED "
                              "tool length" % (t, t))
@@ -283,8 +293,8 @@ def _tool_audit(job, analyses):
             status = "FAIL"
             details.append("%s: %s" % (name, "; ".join(probs)))
         else:
-            details.append("%s: T%s ok, G37-before-G43 / G54 / G30 present"
-                           % (name, ",".join(str(t) for t in ana.tools) or "-"))
+            details.append("%s: T%s ok, G37-before-G43 (electrical for T%d) / G54 / G30 present"
+                           % (name, ",".join(str(t) for t in ana.tools) or "-", iso_t))
     return _check(4, "Tool block audit", status, details)
 
 
