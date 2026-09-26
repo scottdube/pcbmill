@@ -62,7 +62,7 @@ more negative. Verify frames by measurement, never by assumption:</p>
 <div class="card">
 <h2 style="margin-top:0">applymap mode (§6)</h2>
 <p>Current: <b class="mono">{{ params.machine.applymap_mode }}</b> —
-G54 Z0 on the backer; the map carries absolute copper height.</p>
+G54 Z0 on the COPPER (electrical touch); the map carries the copper's deviation from it, the board bottom is the blank thickness below.</p>
 <form method="post" action="{{ url_for('job_params', name=job.data.name, group='machine') }}">
   <select name="applymap_mode">
     <option value="absolute" {% if params.machine.applymap_mode == 'absolute' %}selected{% endif %}>absolute (normal)</option>

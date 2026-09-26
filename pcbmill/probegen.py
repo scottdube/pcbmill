@@ -121,7 +121,8 @@ def generate_program(probe_params, out_path, log_name="probe-results.ngc"):
     # disagree (stale comments caused real confusion). No nested parens.
     # The Z-zero line is the one piece of prose here and is therefore the one
     # thing that CAN go stale: it said "zero on the HIGHEST point of the area"
-    # long after the workflow moved to zeroing on the fixture, contradicting
+    # long after the workflow moved to zeroing on the fixture (and now, since
+    # 2026-09-26, on the copper), contradicting
     # the vendored header a few lines below it in the same emitted file. Keep
     # it in step with vendor/smartprobe_pcb.ngc.
     cfg = [
@@ -143,8 +144,9 @@ def generate_program(probe_params, out_path, log_name="probe-results.ngc"):
         % (p["y_start"], y_end, p["y_count"] - 1, p["y_step"]),
         "(  %d points total. Log file: %s - bare name, PathPilot ini dir)"
         % (n, log_name),
-        "(  Zero Z on the FIXTURE the work is bonded to - NOT on the work.)",
-        "(  The map then holds real heights above that zero; #8 sits below.)",
+        "(  ZERO Z ON THE COPPER by electrical touch. The map then holds the)",
+        "(  copper's deviation from that zero; the board bottom is the blank)",
+        "(  thickness below it. #8 sits below the copper by more than any bow.)",
         CONFIG_END,
     ]
     text = pre + "\n".join(cfg) + frozen
@@ -189,6 +191,10 @@ class ProbeMap:
     @property
     def extents(self):
         return (self.xs[0], self.ys[0], self.xs[-1], self.ys[-1])
+
+    def z_at(self, x, y):
+        """Copper height at the map node nearest (x, y)."""
+        return self.grid[(_nearest(self.xs, x), _nearest(self.ys, y))]
 
     @property
     def zmin(self):

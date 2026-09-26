@@ -642,3 +642,81 @@ def test_stale_probe_program_on_grid_change(tmp_path):
     assert job.artifact_state("probe_program") == "fresh"
     job.update_params("probe", {"x_count": 14})
     assert job.artifact_state("probe_program") == "stale"
+
+
+# ------------------------------------------------------------------
+# Z reference is the COPPER (Scott, 2026-09-26). Once an MDF backer has
+# been used it carries wax and can never give a true zero again, and the
+# only depth that matters is measured from the copper the map records.
+# The board bottom is blank.thickness_in below the local copper; drill
+# depth is audited against THAT, not against an absolute backer at Z0.
+
+def _copper_zero_job(tmp, name, zdrill, thickness=0.0315):
+    """Board-1 job whose probe map was taken with Z0 on the copper: the
+    fixture map (taken with Z0 ~68 thou lower) shifted so its mean is 0."""
+    job = make_job(str(tmp), name)
+    src = os.path.join(FIX, "proberesults_test_A_2.ngc")
+    lines = open(src).read().splitlines()
+    pat = re.compile(r"^(\s*G0*1\s+X\s*-?[\d.]+\s+Y\s*-?[\d.]+\s+Z\s*)(-?[\d.]+)",
+                     re.I)
+    zs = [float(m.group(2)) for m in (pat.match(l) for l in lines) if m]
+    mean = sum(zs) / len(zs)
+    shifted = os.path.join(str(tmp), "copper-zero-map.ngc")
+    with open(shifted, "w") as fh:
+        for l in lines:
+            m = pat.match(l)
+            if m:
+                l = "%s%.4f" % (m.group(1), float(m.group(2)) - mean)
+            fh.write(l + "\n")
+    job.set_probe_map(shifted)
+    job.update_params("blank", {"thickness_in": thickness})
+    job.update_params("cam", {"zdrill": zdrill})
+    pipeline.regenerate(job, log=lambda *a: None)
+    return verify.run(job, deep=False)
+
+
+def test_z_audit_measures_drill_depth_from_the_board_bottom(tmp_path):
+    """A hole 13.5 thou through a 0.0315 blank is a good hole even though
+    it sits 45 thou below Z0 - Z0 is the copper, not the backer."""
+    rep = _copper_zero_job(tmp_path, "cz-ok", zdrill=-0.045)
+    assert check(rep, 5)["status"] == "PASS", check(rep, 5)["details"]
+
+
+def test_z_audit_fails_a_hole_that_stops_inside_the_board(tmp_path):
+    """zdrill -0.030 on a 0.0315 blank: bottom is 1.5 thou ABOVE the board
+    bottom. Under an absolute-backer audit this looked fine."""
+    rep = _copper_zero_job(tmp_path, "cz-shallow", zdrill=-0.030)
+    c = check(rep, 5)
+    assert c["status"] == "FAIL", c["details"]
+    assert any("break through" in d for d in c["details"]), c["details"]
+
+
+def test_z_audit_reports_depth_below_the_board_bottom(tmp_path):
+    """The detail line names the depth past the board bottom, which is the
+    number the operator can check with the blank in hand."""
+    rep = _copper_zero_job(tmp_path, "cz-deep", zdrill=-0.070)
+    c = check(rep, 5)
+    assert c["status"] == "FAIL", c["details"]
+    assert any("backer" in d for d in c["details"]), c["details"]
+    assert any("below board bottom" in d for d in c["details"]), c["details"]
+
+
+def test_z_audit_needs_the_blank_thickness(tmp_path):
+    """No thickness means no board bottom means no drill audit: FAIL, not
+    a silent pass."""
+    rep = _copper_zero_job(tmp_path, "cz-nothick", zdrill=-0.045,
+                           thickness=None)
+    c = check(rep, 5)
+    assert c["status"] == "FAIL", c["details"]
+    assert any("thickness" in d for d in c["details"]), c["details"]
+
+
+def test_probe_program_header_zeroes_on_the_copper(tmp_path):
+    out = str(tmp_path / "probe.ngc")
+    probegen.generate_program({"x_start": 0.05, "x_step": 0.38, "x_count": 3,
+                               "y_start": 0.05, "y_step": 0.42, "y_count": 2,
+                               "z_safe": 0.25, "z_limit": -0.05}, out)
+    text = open(out).read()
+    assert "ZERO Z ON THE COPPER" in text.upper(), text[:1500]
+    assert "NOT on the work" not in text
+    assert "Zero Z on the FIXTURE" not in text

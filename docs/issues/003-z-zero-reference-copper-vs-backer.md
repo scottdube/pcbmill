@@ -1,6 +1,6 @@
 # DESIGN: Z0 is defined at the backer, but the backer is never touchable when probing happens
 
-**Status:** open, 2026-09-26 (workaround in use)
+**Status:** fixed, 2026-09-26 — Z0 is the copper; verify check 5 audits drill depth from the board bottom (local copper − blank.thickness_in) and FAILS if the thickness is unset; probe header, run sheet, constants and web copy updated. Scott: a used MDF backer carries wax and never gives a true zero again.
 **Severity:** medium — no bad output; the reference the design asks for is one the operator cannot reach
 **Found by:** Scott, eyes-carrier-v2, blank already waxed down when it came time to zero
 

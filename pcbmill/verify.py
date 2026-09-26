@@ -327,24 +327,36 @@ def _z_audit(job, analyses, pm):
 
     ana = analyses.get("drill_comp")
     if ana:
-        bottoms = [z for _, _, z in ana.plunges if z < pm.zmin]
-        if bottoms:
-            shallow = [z for z in bottoms if z > -m["drill_breakthrough_min_in"]]
-            deep = [z for z in bottoms if z < m["backer_damage_limit_in"]]
-            details.append("drill_comp plunge bottoms %.4f..%.4f (%d holes); "
-                           "need <= %.4f and >= %.4f"
-                           % (min(bottoms), max(bottoms), len(bottoms),
-                              -m["drill_breakthrough_min_in"],
-                              m["backer_damage_limit_in"]))
+        # Z0 is the COPPER (electrical touch). The board bottom under each
+        # hole is the local map height minus the blank thickness; depth is
+        # audited from there. The backer is assumed to start at the board
+        # bottom - any wax film puts it lower, so this errs safe.
+        thick = job.params["blank"].get("thickness_in")
+        bottoms = [(x, y, z) for x, y, z in ana.plunges if z < pm.zmin]
+        if thick is None:
+            status = "FAIL"
+            details.append("blank.thickness_in is not set - the board bottom "
+                           "is unknown, so drill depth cannot be audited")
+        elif bottoms:
+            below = [(pm.z_at(x, y) - thick) - z for x, y, z in bottoms]
+            need_min = m["drill_breakthrough_min_in"]
+            need_max = -m["backer_damage_limit_in"]
+            shallow = [d for d in below if d < need_min]
+            deep = [d for d in below if d > need_max]
+            details.append("drill_comp %d holes bottom %.4f..%.4f below board "
+                           "bottom (local copper - %.4f blank); need >= %.4f "
+                           "and <= %.4f (backer assumed at board bottom)"
+                           % (len(bottoms), min(below), max(below), thick,
+                              need_min, need_max))
             if shallow:
                 status = "FAIL"
                 details.append("%d hole(s) do NOT break through the board by "
-                               ">= %g in" % (len(shallow),
-                                             m["drill_breakthrough_min_in"]))
+                               ">= %g in" % (len(shallow), need_min))
             if deep:
                 status = "FAIL"
-                details.append("%d hole(s) plunge into backer-damage territory"
-                               % len(deep))
+                details.append("%d hole(s) plunge into backer-damage territory "
+                               "(> %g in below board bottom)"
+                               % (len(deep), need_max))
         low_retract = [z for z in ana.retract_zs if z <= pm.zmax]
         if low_retract:
             status = "FAIL"

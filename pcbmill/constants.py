@@ -5,8 +5,10 @@ manifest under params["machine"].
 """
 
 MACHINE_DEFAULTS = {
-    # G54 convention: Z0 on the backer, not the copper; the probe map
-    # carries the absolute copper height. applymap runs in absolute mode.
+    # G54 convention (Scott, 2026-09-26): Z0 on the COPPER by electrical
+    # touch; the probe map carries the copper's deviation from it and the
+    # board bottom is blank.thickness_in below. applymap runs in absolute
+    # mode. A used MDF backer carries wax and cannot give a true zero.
     "applymap_mode": "absolute",
 
     # Spindle
@@ -26,9 +28,10 @@ MACHINE_DEFAULTS = {
     "ets_frame_offset_in": 0.0041,
 
     # Drill breakthrough: hole bottom must land at least this far below
-    # G54 Z0 (the backer surface) on every hole after compensation ...
+    # the BOARD BOTTOM (local copper - blank thickness) on every hole ...
     "drill_breakthrough_min_in": 0.003,
-    # ... and never deeper than this into the backer.
+    # ... and never further than this past it (backer assumed to start
+    # at the board bottom; a wax film only adds margin).
     "backer_damage_limit_in": -0.030,
 
     # Probe map QA thresholds (FR4.2). Roughness is the void/bond-failure

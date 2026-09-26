@@ -25,7 +25,7 @@ def build(job):
             "tool": "Probe", "t_number": m["probe_tool"],
             "touch_off": "probe loaded as T%d/H%d" % (m["probe_tool"], m["probe_h"]),
             "runtime_min": None,
-            "note": "run smartprobe, then IMPORT probe-results.ngc into the job",
+            "note": "Z0 = electrical touch on the COPPER; run smartprobe, then IMPORT probe-results.ngc into the job",
         })
 
     def add_gcode_op(art, label, tool_label, t_number, touch_off, feed):
