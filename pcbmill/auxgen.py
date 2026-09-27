@@ -215,3 +215,22 @@ def clear_gcode(poly, tool_diameter, depth, t_number, map_bounds=None,
 
     L += ["G30", "M5", "M2", ""]
     return "\n".join(L), region
+
+
+def keepout_refusal(restrictions, empty):
+    """Why a rule area must NOT be rastered, or None if it may be.
+
+    Two refusals. A region holding copper is never rastered, whatever its
+    rules say. A region that lets the copper pour in is not a keepout at
+    all - the pour fills it, there is no island to clear, and rastering it
+    would cut ground copper. A pour-exclusion area (copperpour=not_allowed,
+    tracks/vias/pads allowed) that is EMPTY is the case the clearing cycle
+    exists for: the isolation cut leaves it as a floating island. The
+    earlier rule demanded every restriction be not_allowed and refused all
+    seven eyes-carrier-v2 keepouts, three of which were empty.
+    """
+    if not empty:
+        return "HAS COPPER - do not raster"
+    if restrictions.get("copperpour") != "not_allowed":
+        return "not a copper keepout (the pour is allowed in it)"
+    return None

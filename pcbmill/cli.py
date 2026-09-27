@@ -173,16 +173,12 @@ def cmd_clear(args):
         avail = ", ".join(str(r["index"]) for r in board.rule_areas()) or "none"
         sys.exit("no rule area %d - available: %s" % (args.region, avail))
 
-    # Same two refusals the web path enforces. Rastering a region that holds
-    # copper destroys it; a partial keepout is not a keepout.
+    # Same refusals the web path enforces; the policy lives in auxgen so it
+    # is testable without a job.
     contents = board.region_contents(ra["polygon_mm"])
-    if not contents["empty"]:
-        sys.exit("REFUSED: region %d HAS COPPER - do not raster" % args.region)
-    copper_keys = ("tracks", "pads", "vias", "copperpour")
-    if not all(ra["restrictions"].get(k) == "not_allowed"
-               for k in copper_keys if k in ra["restrictions"]):
-        sys.exit("REFUSED: region %d is not a full copper keepout"
-                 % args.region)
+    why = auxgen.keepout_refusal(ra["restrictions"], contents["empty"])
+    if why:
+        sys.exit("REFUSED: region %d %s" % (args.region, why))
 
     cam = job.params["cam"]
     if cam.get("x_offset") is None:

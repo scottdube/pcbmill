@@ -486,13 +486,9 @@ def create_app(jobs_root):
             idx = int(f["region"])
             ra = next(r for r in board.rule_areas() if r["index"] == idx)
             contents = board.region_contents(ra["polygon_mm"])
-            if not contents["empty"]:
-                flash("REFUSED: region %d HAS COPPER - do not raster" % idx)
-                return redirect(url_for("job_aux", name=name))
-            copper_keys = ("tracks", "pads", "vias", "copperpour")
-            if not all(ra["restrictions"].get(k) == "not_allowed"
-                       for k in copper_keys if k in ra["restrictions"]):
-                flash("REFUSED: region %d is not a full copper keepout" % idx)
+            why = auxgen.keepout_refusal(ra["restrictions"], contents["empty"])
+            if why:
+                flash("REFUSED: region %d %s" % (idx, why))
                 return redirect(url_for("job_aux", name=name))
             cam = job.params["cam"]
             mx, my = -cam["x_offset"], cam["y_offset"]
