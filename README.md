@@ -26,7 +26,14 @@ External requirements (Homebrew): `pcb2gcode` (3.0.4) and `gerbv`
 ```
 
 Then open http://127.0.0.1:8337. Left rail = pipeline stages with status
-badges; the verification report is the landing page for a job.
+badges; the verification report is the landing page for a job. The command
+is run from the repo root (`.venv` is relative).
+
+**PCBMill.app** does both from Finder/Dock/Spotlight: `app/build.sh` builds it
+into `~/Applications`. It starts the server only if nothing answers on 8337,
+then opens the browser. The server is detached and keeps running after the app
+exits; log in `~/Library/Logs/pcbmill.log`, stop with `pkill -f 'pcbmill serve'`.
+The repo path is baked in at build time, so rebuild if the repo moves.
 
 ## CLI (every UI action, scriptable)
 
